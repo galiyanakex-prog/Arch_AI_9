@@ -1,51 +1,70 @@
-# День 20 — Планировщик, пайплайн и несколько MCP-серверов
+# AI_9 — планировщик, пайплайн, несколько MCP-серверов и RAG
 
 > **Неделя 4** — «Инструменты и интеграции: MCP, тулинг, изоляция прав».
-> День 16 — стартовый день недели: поверх наследия дней 11–15 (явная модель памяти,
-> персонализация, формализованное состояние задачи, инварианты, строгая машина
-> состояний) агент модернизируется **полным вертикальным срезом MCP-подсистемы**:
-> **настоящее** подключение к **реальному** MCP-серверу (Streamable HTTP,
-> `https://weatherapi.projecteol.ru/mcp/`), discovery (`tools/list`), нормализация тулов
-> во внутреннюю модель `ToolDescriptor`, каталогизация в `ToolRegistry` с атомарным
-> snapshot и персистентностью через `Store`, **настоящий вызов инструмента** (`tools/call`)
-> и **полный LLM tool-use** (агент сам вызывает инструмент по запросу пользователя).
+> Поверх наследия дней 11–15 (явная модель памяти, персонализация, формализованное
+> состояние задачи, инварианты, строгая машина состояний) агент расширен **полным
+> вертикальным срезом MCP-подсистемы**: **настоящее** подключение к **реальным**
+> MCP-серверам (Streamable HTTP), discovery (`tools/list`), нормализация тулов во
+> внутреннюю модель `ToolDescriptor`, каталогизация в `ToolRegistry` с атомарным
+> snapshot и персистентностью через `Store`, **настоящий вызов инструмента**
+> (`tools/call`) и **полный LLM tool-use** (агент сам вызывает инструмент по запросу
+> пользователя). Поверх MCP-инфраструктуры добавлены: **планировщик и фоновые задачи**
+> (24/7 через внешний worker), **пайплайн из MCP-инструментов** и **несколько
+> MCP-серверов** (маршрутизация и длинный флоу), а также **RAG-модуль** (`rag/`):
+> индексация корпуса, локальные эмбеддинги (Ollama `bge-m3`), гибридный поиск и
+> проверка опоры ответа (grounding).
+>
 > Формула ценности — **соединение + список инструментов + реальный вызов — не хак, а
-> вертикальный срез расширяемой подсистемы**: добавление нового MCP-сервера завтра не
-> потребует изменений в `TaskStage`, `PromptBuilder`, профилях, памяти или машине
-> переходов. MCP — стандарт (не фреймворк) подключения нейронок к внешним сервисам;
-> ядро MCP-сервера — маппинг «тул ↔ HTTP-реквест» (description + input-схема +
+> вертикальный срез расширяемой подсистемы**: добавление нового MCP-сервера не требует
+> изменений в `TaskStage`, `PromptBuilder`, профилях, памяти или машине переходов.
+> MCP — стандарт (не фреймворк) подключения нейронок к внешним сервисам; ядро
+> MCP-сервера — маппинг «тул ↔ HTTP-реквест» (description + input-схема +
 > `CallToolResult`).
 >
-> **День 17 (наследие).** Инструмент задания `get_time(timezone_name) -> ISO 8601`
-> с сервера `http://91.188.212.77:8000/mcp` (env `MCP_SERVER_URL`): LLM сам вызывает
-> инструмент (`Agent._respond_with_tools`) и **использует результат** в финальном ответе.
+> **Наследие.** Инструмент задания `get_time(timezone_name) -> ISO 8601` с сервера
+> `http://91.188.212.77:8000/mcp` (env `MCP_SERVER_URL`): LLM сам вызывает инструмент
+> (`Agent._respond_with_tools`) и **использует результат** в финальном ответе.
 > Демонстрация: «который час в Москве?» → `get_time({"timezone_name":"Europe/Moscow"})`
 > → «В Москве сейчас 12:52».
 >
-> **Цепочка наследования.** `den_17` → `den_18` → `den_19` → `den_20`:  MCP-инфраструктура
-> предыдущих дней перенесена без изменений.
->
-> **День 20 (эта редакция).** Поверх MCP-инфраструктуры дней 16–19 добавлены **три
-> возможности** (три задания `Задание_d20.txt`):
-> 1. **Планировщик и фоновые задачи** — MCP-инструмент с отложенным/периодическим
->    выполнением (`schedule_reminder`/`schedule_collection`/`run_due`/`get_summary`),
->    данные в JSON, агрегированная сводка; агент работает **24/7** через **внешний
->    worker** (не LLM — «у агента нет heartbeat»). Формат отчёта — **Видео + Код**.
-> 2. **Пайплайн из MCP-инструментов** — `search → summarize → saveToFile`,
->    автовыполнение цепочки и передача данных между инструментами. Формат — **Код**.
-> 3. **Несколько MCP-серверов** — выбор нужного инструмента, маршрутизация, длинный
->    флоу с тулами разных серверов. Формат — **Код**.
->
-> Целевая архитектура — `arch.md` (актуализирована под день 20). Сценарий ручной
-> проверки (три сценария для видео) — `dev/Проверка.md`.
+> **Три задания дня 20:** (1) **планировщик и фоновые задачи** — MCP-инструмент с
+> отложенным/периодическим выполнением, данные в JSON, агрегированная сводка, режим
+> **24/7** через **внешний worker** (не LLM — «у агента нет heartbeat»); (2) **пайплайн
+> из MCP-инструментов** — `search → summarize → saveToFile`, автовыполнение цепочки и
+> передача данных между инструментами; (3) **несколько MCP-серверов** — выбор нужного
+> инструмента, маршрутизация, длинный флоу. Сценарий ручной проверки — `dev/Проверка.md`.
+
+---
+
+## Содержание
+
+- [Суть проекта](#суть-проекта)
+- [Модель памяти](#модель-памяти)
+- [Персонализация](#персонализация)
+- [Инварианты и ограничения состояния](#инварианты-и-ограничения-состояния)
+- [Контролируемые переходы состояний](#контролируемые-переходы-состояний)
+- [Модульность и слои](#модульность-и-слои)
+- [Архитектура](#архитектура)
+- [Команды REPL](#команды-repl)
+- [Запуск](#запуск)
+- [Агентный цикл](#агентный-цикл)
+- [Тестирование и приёмка](#тестирование-и-приёмка)
+- [Служебное пространство `dev/`](#служебное-пространство-dev)
+- [Карта артефактов](#карта-артефактов)
+- [Порядок достижения итогового состояния](#порядок-достижения-итогового-состояния)
+- [Риски и откат](#риски-и-откат)
+- [Известные шероховатости и заделы](#известные-шероховатости-и-заделы)
+- [Результат](#результат)
+
+---
 
 ## Суть проекта
 
 CLI-агент (RouterAI, модель `stepfun/step-3.5-flash`) с **явной моделью памяти**,
 **настраиваемой персонализацией**, **формализованным состоянием задачи**, **набором
-неизменяемых правил (инвариантов)**, **контролируемым жизненным циклом задачи** и —
-новое в Дне 16 — **подключением к внешнему миру через MCP**: внешний источник
-инструментов, подключённый к универсальному каталогу `ToolRegistry`.
+неизменяемых правил (инвариантов)**, **контролируемым жизненным циклом задачи**,
+**подключением к внешнему миру через MCP** (внешний источник инструментов) и
+**RAG-модулем** (поиск по документам с проверкой опоры ответа).
 
 Память разделена на четыре физически отдельных слоя (краткосрочная / рабочая /
 долговременная / профиль), запись идёт только явным вызовом `memory.remember(layer,
@@ -55,21 +74,24 @@ CLI-агент (RouterAI, модель `stepfun/step-3.5-flash`) с **явной
 whitelist, `try_transition` → `InvalidTransitionError`, журнал `transition_log`) и
 слой инвариантов (`InvariantChecker` — «код запрещает, промт рекомендует»).
 
-День 16 добавляет **шестой, интеграционный «кубик»** — MCP как внешний источник
-инструментов (не заменяя ни один из пяти кубиков дней 11–15). День 17 подключает к
-этому «кубику» **конкретный инструмент задания** `get_time` (сервер `time`) и
-демонстрирует реальное поведение агента: LLM сам вызывает инструмент и использует
-результат.
+**Шестой, интеграционный «кубик»** — MCP как внешний источник инструментов (не
+заменяя ни один из пяти кубиков дней 11–15). К нему подключён **конкретный инструмент
+задания** `get_time` (сервер `time`), демонстрирующий реальное поведение агента: LLM
+сам вызывает инструмент и использует результат. **RAG-модуль** добавляет седьмой слой —
+поиск по локальному корпусу документов с гибридным ранжированием и проверкой опоры.
 
-```
+
 MCPGateway (соединение + handshake + tools/list + tools/call)
    → MCPToolProvider (нормализация mcp-тула → ToolDescriptor)
       → ToolRegistry (каталог + атомарный snapshot + персистентность через Store)
          → ToolExecutor (policy → вызов → аудит) → LLM tool-use (агент сам вызывает тул)
             → CLI (/mcp tools, /mcp call, --mcp-probe — вывод списка и вызов инструментов)
-```
 
-Ключевые границы дня:
+RagService (индексация корпуса → гибридный поиск → блок [rag] в промте → grounding)
+   → PromptBuilder → LLM (ответ со ссылками [doc_id#chunk_id])
+
+
+Ключевые границы:
 
 - **MCP — источник инструментов, не слой контроля**: `MCPGateway` — адаптер («как
   технически вызвать»), он не знает о стадиях, профилях и памяти; контроль остаётся
@@ -78,81 +100,30 @@ MCPGateway (соединение + handshake + tools/list + tools/call)
 - **Инструмент ≠ переход**: вызов (и даже успешное завершение) MCP-инструмента
   **никогда** не означает переход `TaskStage`; MCP-стадий нет и не будет.
   Инфраструктурные состояния живут отдельно: `MCPConnectionState` (подключение) и
-  `ToolExecutionState` (вызов).
+  `ToolExecutionState` (вызов). То же для RAG: RAG ≠ переход.
 - **Модель MCP не протекает в `core`**: `mcp` SDK импортируется только в
   `integrations/mcp/` (транспорт и демо-сервер); `ToolDescriptor` — внутренняя
   модель агента; имена квалифицируются (`mcp.<server>.<tool>`).
-- **MCP выключен по умолчанию** (`mcp_enabled=False`): без `--mcp` агент работает
-  ровно как в `den_15`; все прежние тесты и критерии приёмки проходят без MCP и сети.
+- **`rag/` и `core/` не импортируют друг друга** — связь только через DI-фасад
+  `RagService` и готовый текст блока `[rag]`.
+- **MCP выключен по умолчанию** (`mcp_enabled=False`); **RAG выключен по умолчанию**
+  (`--rag`). Без флагов агент работает ровно как в `den_15`; прежние тесты и критерии
+  приёмки проходят без MCP, без RAG и без сети.
 - **Изоляция прав через тулинг**: `allowed_tools`/`denied_tools` в конфиге сервера —
   запрещённый тул не попадает в discovery (серверу даём только часть тулов).
+- **Однонаправленные зависимости**: `Kod.py` → `core/` → `memory/` → `storage/`;
+  `integrations/` и `rag/` — сбоку, подключаются только DI-композицией в `Kod.py`.
 
-## Что нового относительно Дня 15
-
-- **`core/tools.py`** — внутренняя модель инструментов **без MCP SDK и без сети**:
-  `ToolDescriptor` (frozen: name/description/input_schema/source/provider/
-  original_name + policy-поля: risk_level="unknown", allowed_stages=5 рабочих
-  стадий, requires_confirmation=False, enabled=True), `ToolCallRequest` /
-  `ToolExecutionResult` (**рабочий** `tools/call`), `ToolExecutionState`
-  (requested/denied/waiting_confirmation/running/succeeded/failed/timed_out/
-  cancelled), `ToolProvider` (ABC: provider_id/discover), `ToolCatalogSnapshot`
-  (frozen: version/tools/created_at);
-- **`core/tool_registry.py`** — `ToolRegistry`: add_provider (замена по provider_id
-  с логом) / unregister_provider / get (неизвестное → KeyError с подсказкой) /
-  available_for / snapshot / **refresh** (discover у всех провайдеров → валидация схем
-  JSON-примитивами → коллизии квалифицированных имён → монотонный version →
-  **атомарный swap**); недоступный провайдер изолирован; реестр не проверяет
-  бизнес-правила и не зовёт `StateMachine`;
-- **`core/tool_policy.py`** (новое) — `ToolPolicy.check`: enabled → схема аргументов →
-  стадия (`allowed_stages`) → инварианты (`InvariantChecker` поверх `ProposedAction`) →
-  `requires_confirmation`; итог `PolicyDecision`;
-- **`core/tool_executor.py`** (новое) — `ToolExecutor.execute`: policy → `gateway.call_tool`
-  → `ToolExecutionResult` → аудит `tool_audit.jsonl` (execution_id, tool, status, phase,
-  `arguments_hash` — только отпечаток, не сырые аргументы); **не** вызывает `StateMachine`;
-- **`integrations/mcp/`** — слой внешних интеграций: `config.py` (`MCPServerConfig` frozen
-  + `load_servers_config`: битый/отсутствующий `servers.json` → дефолт — **сервер задания**
-  `time` (инструмент `get_time`, endpoint из env `MCP_SERVER_URL`) + **реальный
-  погодный HTTP-сервер** `weather` + демо-сервер `demo` для тестов; endpoint погоды из env
-  `MCP_WEATHER_URL`), `transport.py` (`MCPTransport` ABC + `StdioMCPTransport` +
-  **`HttpMCPTransport`** (Streamable HTTP, SDK 2.2.0) + `FakeMCPTransport`; фабрика
-  `make_transport` по полю `transport`; фикс чтения схемы `input_schema`),
-  `client.py` (`MCPClient`: initialize/list_tools/**call_tool**), `gateway.py`
-  (`MCPConnectionState` + `MCPGateway` async: start/stop/status/discover/**call_tool** +
-  синхронный фасад `MCPGatewaySync` на постоянной фоновой задаче), `provider.py`
-  (`MCPToolProvider` — нормализация → `mcp.<server>.<tool>`), `demo_server.py`
-  (локальный stdio MCP-сервер, 3 тула);
-- **`core/llm_client.py`** — **LLM tool-use**: `LLMReply(content, tool_calls, raw)`,
-  парсеры `parse_tool_calls` (нативный OpenAI-формат) и `parse_fallback_tool_call`
-  (JSON-протокол), `complete_with_tools` (нативный путь `RouterAIClient` + fallback;
-  `MockClient` — детерминированный tool-use);
-- **`core/prompt_builder.py`** — новый необязательный блок `[tools]` (после
-  `invariants`, до `long_term`) + `render_tools` под лимитами (`ToolPromptPolicy`:
-  `max_tools`/`max_schema_tokens`);
-- **`core/agent.py`** — **агентный tool-use цикл** (`_respond_with_tools`): LLM →
-  tool call → `ToolExecutor` → tool-сообщение → LLM → ответ (лимит итераций);
-  `external_actions` в рабочей памяти (сырое — не в память);
-- **`storage/store.py`** — методы фасада: `users/<id>/integrations/mcp/servers.json`
-  (конфиг) + `catalog.json` (снимок каталога); **рабочий** аудит `tool_audit.jsonl`
-  (`append_tool_audit`/`load_tool_audit`) — история вызовов отдельно от `transition_log`;
-- **`Kod.py`** — DI `build_agent(mcp_enabled=False)` (gateway → provider → registry →
-  policy → executor только при `--mcp`; стартовое discovery + сейв каталога), семейство
-  `/mcp` (7 форм: status/servers/tools/refresh/connect/**call**/disconnect), флаги
-  `--mcp` и `--mcp-probe` (one-shot результат задания: подключиться → вывести список
-  тулов → закрыться; exit 0/1) — итого **14 флагов**; `/mcp`-команды токенов LLM не тратят;
-- **Тестовый контур расширен**: L2 — `test_mcp.py` (31 тест) → **122 OK**; L4 —
-  `scenario_llm_tool_use` + `scenario_tool_denied` → **14/14**; L3 — smoke 7 тестов;
-  гейт — **21 проверка**; приёмка — **54 критерия** (48 прежних + 49–54 дня 17);
-- **Наследие дней 11–15 без регрессии**: память, профили, инварианты, машина
-  состояний, LLM-клиент — контракты не тронуты; MCP off по умолчанию.
+---
 
 ## Модель памяти
 
 | Тип | Что хранит | Где (файл/хранилище) | Почему так |
 |---|---|---|---|
-| **Краткосрочная** (`ShortTermMemory`, scope=`session`) | текущий диалог — неизменяемые сообщения с `id`/`parent_id` | `users/<id>/tasks/<task>/sessions/<sid>/session.json` | сообщения — история (append-only), их нельзя переписывать; `parent_id` — задел ветвления (наследие Дня 10) |
+| **Краткосрочная** (`ShortTermMemory`, scope=`session`) | текущий диалог — неизменяемые сообщения с `id`/`parent_id` | `users/<id>/tasks/<task>/sessions/<sid>/session.json` | сообщения — история (append-only), их нельзя переписывать; `parent_id` — задел ветвления |
 | **Рабочая** (`WorkingMemory`, scope=`task`) | состояние задачи: `description`, `refs`, `lifecycle_summary`, `decisions`, `constraints`, `facts`, `open_questions`, `current_state` | `users/<id>/tasks/<task>/working_memory.json` | это **пересчитываемое состояние**, а не лог сообщений: списки дополняются, скаляры перезаписываются |
 | **Долговременная** (`LongTermMemory`, scope=`user`) | `profile_ref` (ССЫЛКА), `tasks[]` (со ссылками и `source_session`), `decisions[]` (`{text, status}` — «выполнена»/«не выполнена»), `knowledge[]` | `users/<id>/long_term_memory.json` | живёт между сессиями и задачами; профиль держится отдельно, здесь — только ссылка (канон куратора) |
-| **Профиль** (`Profile`, scope=`user`) | **несколько профилей** на пользователя: `profile_id`, `name`, `domain`, `triggers[]`, `style` + `constraints` + `context`, `skills[]` (пайплайн) | JSON в SQLite (`profiles(user_id, profile_id)`), зеркала `users/<id>/profiles/<pid>.json` | канон куратора: профили — отдельная сущность в БД, а не часть долговременной памяти; запись слиянием (MERGE); активный профиль подключён к каждому запросу |
+| **Профиль** (`Profile`, scope=`user`) | **несколько профилей** на пользователя: `profile_id`, `name`, `domain`, `triggers[]`, `style` + `constraints` + `context`, `skills[]` (пайплайн) | JSON в SQLite (`profiles(user_id, profile_id)`), зеркала `users/<id>/profiles/<pid>.json` | профили — отдельная сущность в БД, а не часть долговременной памяти; запись слиянием (MERGE); активный профиль подключён к каждому запросу |
 
 Единая точка входа в память — `MemoryManager`: `remember()` (запись с логом маршрута),
 `recall()` (чтение выбранных слоёв), `build_blocks()` (текстовые блоки для промта в порядке
@@ -164,7 +135,7 @@ MCPGateway (соединение + handshake + tools/list + tools/call)
 
 ### Иерархия хранения
 
-```
+
 users/<user_id>/
 ├── profile.json                 # зеркало профиля default (авторитет — SQLite profiles)
 ├── profiles/                    # зеркала всех профилей пользователя
@@ -172,69 +143,78 @@ users/<user_id>/
 │   ├── chemist.json
 │   └── economist.json
 ├── long_term_memory.json        # profile_ref + задачи + решения + знания
-├── integrations/mcp/            # ← НОВОЕ (День 16): ветка MCP
+├── integrations/mcp/            # ветка MCP
 │   ├── servers.json             # конфиг MCP-серверов (user-scope)
-│   └── catalog.json             # снимок каталога инструментов (version, tools, created_at)
+│   ├── catalog.json             # снимок каталога инструментов (version, tools, created_at)
+│   └── scheduler/               # {jobs,observations,summaries}.json (планировщик, день 20)
 └── tasks/<task_name>/
-    ├── invariants.json          # ConstraintSet (неизменяемые правила задачи, День 14)
-    ├── task_state.json          # снимок TaskState (+ transition_log, День 15)
-    ├── working_memory.json      # пересчитываемое состояние задачи (+ current_state — зеркало стадии)
+    ├── invariants.json          # ConstraintSet (неизменяемые правила задачи)
+    ├── task_state.json          # снимок TaskState (+ transition_log)
+    ├── working_memory.json      # пересчитываемое состояние задачи (+ current_state)
     ├── sessions_resume.md       # резюме сессий задачи (блок summary в промте)
+    ├── tool_audit.jsonl         # история вызовов инструментов (task-scope)
     └── sessions/<session_id>/   # session_id = ГГГГММДД_ЧЧММСС
         └── session.json         # краткосрочная память: сообщения с parent_id
-```
+
 
 Разделение ответственности: `session.json` — неизменяемая история; `working_memory.json` —
 пересчитываемое состояние памяти задачи; `task_state.json` — формализованное состояние
 **жизненного цикла** (включая журнал переходов); `invariants.json` — **неизменяемые правила**;
-`integrations/mcp/` — конфиг и каталог внешних инструментов. Пять разных сущностей, разные
-файлы. **Очистка истории диалога не сбрасывает состояние, не удаляет инварианты, не трогает
-журнал переходов и конфиг MCP** (разные файлы).
+`integrations/mcp/` — конфиг и каталог внешних инструментов; `tool_audit.jsonl` — история
+вызовов (отдельно от `transition_log`). Разные сущности, разные файлы. **Очистка истории
+диалога не сбрасывает состояние, не удаляет инварианты, не трогает журнал переходов и
+конфиг MCP.**
 
 База профилей — `users/profiles.db` (общая для всех пользователей).
 Все пути знает только `storage/store.py` (`safe_name`, `ensure_user/task/session`,
 `read_json`/`write_json` с каноническими дефолтами, `task_state_path`/`read_task_state`/
 `write_task_state` с миграцией `"execution"` → `implementation`,
 `invariants_path`/`read/write_invariants`, `mcp_servers_path`/`read/write_mcp_servers`,
-`tool_catalog_path`/`read/save_tool_catalog`, задел `tool_audit_path`/`append/load_tool_audit`).
-Битый или отсутствующий файл не роняет приложение — чтение всегда возвращает схему по умолчанию;
+`tool_catalog_path`/`read/save_tool_catalog`, `append_tool_audit`/`load_tool_audit`).
+Битый или отсутствующий файл не роняет приложение — чтение всегда возвращает схему по
+умолчанию (`read_*` → `None` при отсутствии/битости, дефолтизация у вызывающего);
 при недоступной БД `load_profile`/`list_profiles` откатываются на зеркала `profiles/` →
 `profile.json`.
 
 ### Сборка промта (явные блоки + дозированная доставка + бюджет)
 
-```
-[system: роль] → [system: profile] → [system: invariants] → [system: long_term] →
-[system: working] → [system: summary, опц.] → [messages: short_term (окно 10)] →
-[user: текущий запрос] → [резерв под ответ]
-```
 
-- `BLOCK_ORDER = ("role", "profile", "invariants", "long_term", "working", "summary",
-  "short_term", "current")`;
+[system: роль] → [system: profile] → [system: invariants] → [system: tools, опц.] →
+[system: long_term] → [system: working] → [system: summary, опц.] →
+[messages: short_term (окно 10)] → [user: текущий запрос] → [резерв под ответ]
+
+
+- `BLOCK_ORDER = ("role", "profile", "invariants", "tools", "long_term", "working",
+  "summary", "short_term", "current")`; блок `[rag]` вставляется после `[tools]`, до
+  `[long_term]` (см. ниже);
 - доставляемое подмножество блоков задаётся каноническим набором
-  `DELIVERABLE = ("profile", "invariants", "long_term", "working", "summary",
+  `DELIVERABLE = ("profile", "invariants", "tools", "long_term", "working", "summary",
   "short_term")` из `core/prompt_builder.py` (`role`/`current` — всегда, неуправляемы);
-  `--deliver`/`/deliver` пересекаются с `DELIVERABLE` (не с `LAYER_ORDER` — тот
-  задаёт порядок **слоёв памяти**), поэтому `summary` достижим из CLI
+  `--deliver`/`/deliver` пересекаются с `DELIVERABLE`, поэтому `summary` достижим из CLI
   (`--deliver profile,summary`);
 - слои добавляются system-блоками с заголовком `[<имя>]` **только если имя есть в `deliver`**;
 - `short_term` идёт отдельными сообщениями `{role, content}`, а не склеенным текстом;
 - бюджет: необязательный блок пропускается, если `used + tokens > budget`; роль и запрос не
   урезаются никогда; бюджет передаётся в рабочем пути (`Agent.prompt_budget` ← флаг
   `--budget`, по умолчанию `None` — обрезание выключено);
+- блок `[tools]` — каталог инструментов (`render_tools` под лимитами `ToolPromptPolicy`:
+  `max_tools`/`max_schema_tokens`); блок `[rag]` — найденные источники со ссылками
+  `[doc_id#chunk_id]` (усекается первым при нехватке бюджета);
 - блок `[external_context]` (MCP resources) и дозированная доставка описаний тулов —
-  **задел** следующих дней (`ToolPromptPolicy`); `BLOCK_ORDER` в Дне 16 не меняется.
+  **задел** следующих дней.
+
+---
 
 ## Персонализация
 
-Поверх модели памяти — **несколько профилей на пользователя** (`arch_den_12.md` §2.3–2.7).
-Профиль — «призма» под домен/задачу: он определяет стиль, ограничения, контекст, доменную
-область и порядок скиллов. Активный профиль привязан к сессии и входит в каждый промт, поэтому
-один и тот же запрос даёт разные ответы.
+Поверх модели памяти — **несколько профилей на пользователя**. Профиль — «призма» под
+домен/задачу: он определяет стиль, ограничения, контекст, доменную область и порядок
+скиллов. Активный профиль привязан к сессии и входит в каждый промт, поэтому один и
+тот же запрос даёт разные ответы.
 
 ### Модель профиля (расширение JSON, обратно совместимое)
 
-```json
+
 {
   "id": "<user_id>",
   "profile_id": "chemist",
@@ -249,7 +229,7 @@ users/<user_id>/
     {"name": "review", "instructions": "проверь факты по домену"}
   ]
 }
-```
+
 
 - `profile_id` — короткое имя профиля (`safe_name`); первый/единственный профиль — `default`;
   `domain`/`triggers`/`skills` опциональны (пустые — профиль работает как в Дне 11);
@@ -263,9 +243,9 @@ users/<user_id>/
   профиля (`ctx.profile_id`);
 - **память независима от профилей**: краткосрочная/рабочая/долговременная не меняются при
   переключении профиля — профиль влияет только на блок `profile` в промте;
-- **профиль MCP менять не может** (канон `arch_den_16.md` §2.7): изменение профиля — только
-  явная механика профилей; задел `tool_policy` в профиле (`allow`/`deny`) — только **сужение**
-  прав, никогда расширение глобального запрета.
+- **профиль MCP менять не может**: изменение профиля — только явная механика профилей;
+  задел `tool_policy` в профиле (`allow`/`deny`) — только **сужение** прав, никогда
+  расширение глобального запрета.
 
 ### Профиль-роутер (`core/profile_router.py`)
 
@@ -276,10 +256,12 @@ users/<user_id>/
 `/profile route <текст>`. Режим `/profile auto on` запускает роутер на каждый запрос **до** сборки
 промта.
 
-## Инварианты и ограничения состояния (День 14, без регрессии)
+---
+
+## Инварианты и ограничения состояния
 
 Слой **неизменяемых правил** поверх памяти, персонализации и автомата: агент не имеет
-права нарушать заданные инварианты. Главная идея дня 14: **инвариант — условие, которое должно
+права нарушать заданные инварианты. Главная идея: **инвариант — условие, которое должно
 сохраняться во всех допустимых состояниях; переход, нарушающий его, должен быть запрещён**.
 Недостаточно добавить правила в системный промт — перед выполнением действия запускается
 **отдельная Python-проверка** («код запрещает, промт рекомендует»).
@@ -288,7 +270,7 @@ users/<user_id>/
 |---|---|
 | `Invariant` | одно правило: `id`, `description`, `category`, `severity`, `active` |
 | `ConstraintSet` | набор правил — **отдельная сущность** (не память, не профиль, не диалог) |
-| `ProposedAction` | предлагаемое действие (`technology`, `adds_dependency`, `changes_database_schema`, `language`) |
+| `ProposedAction` | предлагаемое действие (`technology`, `adds_dependency`, `changes_database_schema`, `language`; расширен MCP-полями `action_type`/`tool_name`/`arguments`) |
 | `InvariantChecker` (ABC) | интерфейс проверки: `check()` (блокирующие) + `warnings()` (`severity="warning"`) |
 | `RuleBasedChecker` | детерминированная реализация: правила по id-неймспейсу, без вызовов LLM |
 | `update_invariant` | изменение правила — только авторизованной операцией (`authorized=True`) |
@@ -300,21 +282,24 @@ users/<user_id>/
 обязателен, (4) допустимая альтернатива. Изменение правила — `/invariant set <id> <текст>
 --yes` (без `--yes` — `PermissionError`).
 
+**Правило `tool.deny.<qualified>`** запрещает конкретный инструмент; одно правило «нельзя
+менять схему БД» работает для локальной функции, MCP-инструмента и действия, предложенного
+LLM.
+
 **Переходы и инварианты — разные сущности контроля**: `state_machine` проверяет переходы
 (этапы), `InvariantChecker` — действия; разные модели, разные проверки, разные отказы.
-Задел дня 17+: расширение `ProposedAction` полями `action_type`/`tool_name`/`arguments` —
-одно правило «нельзя менять схему БД» будет работать для локальной функции, MCP-инструмента
-и действия, предложенного LLM.
 
-## Контролируемые переходы состояний (День 15, без регрессии)
+---
 
-Главная идея Дня 15: **жизненный цикл задачи — строгая машина состояний**. Чёткий список
+## Контролируемые переходы состояний
+
+**Жизненный цикл задачи — строгая машина состояний**. Чёткий список
 допустимых состояний и разрешённых переходов между ними; ассистент **физически не может
 «перепрыгнуть» этап** — запрет работает на уровне кода, а не только текста.
 
 ### Модель состояний (`TaskStage` — 8)
 
-```python
+python
 class TaskStage(Enum):
     NEW = "new"                      # задача создана, но ещё не начата
     PLANNING = "planning"            # план строится/построен, не утверждён
@@ -324,11 +309,11 @@ class TaskStage(Enum):
     DONE = "done"                    # задача завершена (терминальная)
     PAUSED = "paused"                # пауза (возврат в previous_stage)
     FAILED = "failed"                # ошибка (восстановление — /task retry)
-```
+
 
 ### Карта переходов (whitelist)
 
-```python
+python
 ALLOWED_TRANSITIONS: dict[TaskStage, set[TaskStage]] = {
     NEW:            {PLANNING, PAUSED, FAILED},
     PLANNING:       {PLAN_APPROVED, PAUSED, FAILED},          # НЕТ implementation
@@ -339,7 +324,7 @@ ALLOWED_TRANSITIONS: dict[TaskStage, set[TaskStage]] = {
     DONE:           set(),        # терминальная
     FAILED:         {PLANNING},   # восстановление — явный /task retry
 }
-```
+
 
 Запреты задания реализуются **отсутствием дуги в графе** (не `if`-ами): «нельзя делать
 реализацию до утверждённого плана» — нет дуг `new → implementation` и
@@ -347,16 +332,16 @@ ALLOWED_TRANSITIONS: dict[TaskStage, set[TaskStage]] = {
 `done` через `validation`; пауза — не лазейка (из `paused` только `resume_task()` →
 `previous_stage`).
 
-### API контроля (имена из задания)
+### API контроля
 
-```python
+python
 can_transition(from_state, to_state) -> bool   # единственный источник истины — карта
 
 try_transition(state, proposed) -> TaskState    # единственная точка смены этапа:
     # недопустимый → InvalidTransitionError, состояние НЕ меняется,
     # попытка пишется в transition_log (allowed=False);
     # допустимый → меняет stage + запись (allowed=True)
-```
+
 
 Поток: `/plan <цель>` строит план и **останавливается** в `planning` (утверждение —
 контрольный пункт человека); `/approve` — единственный переход в `plan_approved`;
@@ -364,84 +349,294 @@ try_transition(state, proposed) -> TaskState    # единственная то�
 (`REFUSAL_RULES` — детерминированные тексты, без LLM) и корректный следующий шаг;
 каждая попытка (успех и отказ) фиксируется в `transition_log` и переживает перезапуск.
 
-**MCP эту машину не трогает** (главная граница Дня 16): успех вызова MCP-инструмента не
-создаёт запись в `transition_log`; `MCPGateway`/`ToolRegistry` не вызывают `StateMachine`
-(проверяется тестом «MCP не трогает состояние»).
+**MCP и RAG эту машину не трогают**: успех вызова инструмента не создаёт запись в
+`transition_log`; `MCPGateway`/`ToolRegistry`/`RagService` не вызывают `StateMachine`
+(проверяется тестами «MCP не трогает состояние» и «TaskStage не затронут»).
 
-## Подключение MCP (День 16 → День 17)
+---
 
-Результат задания дня 16 — «код, который подключается к MCP и выводит список доступных
-инструментов» — реализован **не одноразовым скриптом, а первым вертикальным срезом
-подсистемы** (канон `Рекомендации_MCP_d16.txt`): один и тот же кодовый путь
-`MCPGateway → MCPToolProvider → ToolRegistry` работает и в one-shot флаге `--mcp-probe`,
-и в REPL-команде `/mcp tools`. День 17 добавляет **конкретный инструмент задания**
-`get_time` (сервер `time`) и демонстрирует **реальное поведение агента**: LLM сам
-вызывает инструмент и использует результат.
+## Модульность и слои
 
-### Внутренняя модель инструментов (`core/tools.py`)
+Направление зависимостей однонаправленное: `Kod.py` → `core/` → `memory/` → `storage/`;
+`integrations/` и `rag/` — сбоку, подключаются только DI-композицией в `Kod.py`.
+`mcp` SDK импортируется только в `integrations/mcp/`; `core`/`memory`/`storage` его не
+импортируют никогда. **`rag/` не импортирует `core/`, а `core/` не импортирует `rag/`** —
+связь через DI-фасад `RagService` и готовый текст блока `[rag]`. Слои памяти и ядро ФС
+напрямую не трогают — только через фасад `Store`.
 
-Контракты **без MCP SDK и без сети** — модель MCP не протекает в `core`:
+**Хранилище** (`storage/`) — прежний фасад `Store` + ветка `integrations/mcp/`:
+`servers.json` (какие серверы, транспорт, таймауты, allowed/denied_tools), `catalog.json`
+(снимок каталога: schema_version, version, tools, created_at), `tasks/<task>/tool_audit.jsonl`
+(история вызовов, task-scope, отдельно от `transition_log`). Механика устойчивости —
+битый/отсутствующий файл → схема по умолчанию, не падение. Gateway JSON напрямую не пишет —
+только через фасад `Store`.
 
-| Сущность | Назначение |
-|---|---|
-| `ToolDescriptor` (frozen) | квалифицированное имя (`mcp.weather.search_locations`), description, input_schema, source (`"mcp"`), provider (server_id), original_name (`search_locations`) + policy-поля: risk_level, allowed_stages, requires_confirmation, enabled |
-| `ToolCallRequest` / `ToolExecutionResult` | **рабочий** `tools/call`: запрос (name/arguments/call_id) и результат (execution_id/tool/status/summary/raw/is_error) |
-| `ToolExecutionState` | инфраструктурные состояния вызова (requested/denied/waiting_confirmation/running/succeeded/failed/timed_out/cancelled) — НЕ `TaskStage` |
-| `ToolProvider` (ABC) | единый интерфейс источников инструментов: `provider_id()` / `discover()` |
-| `ToolCatalogSnapshot` (frozen) | атомарная версия каталога: version (монотонный), tools, created_at |
+**Память** (`memory/`) — 4 слоя, MERGE/append только через `MemoryManager`, дозированная
+доставка + токен-бюджет. MCP-политика памяти — задел: сырой ответ → только текущий execution
+context; краткое резюме → short_term; нормализованный итог → working (`external_actions[]`);
+важный факт → long_term только по политике; секреты — никогда; профиль MCP менять не может.
 
-### Реестр (`core/tool_registry.py`)
+**Ядро** (`core/`) — прежние сущности без регрессии + инструменты:
+`tools.py` (контракты), `tool_registry.py` (каталог + атомарный snapshot),
+`tool_policy.py` (проверки вызова), `tool_executor.py` (исполнение + аудит),
+`tool_routing.py` (детерминированный выбор инструмента), `tool_pipeline.py` (пайплайн);
+расширения `llm_client.py` (tool-use), `prompt_builder.py` (блоки `[tools]`/`[rag]`),
+`agent.py` (агентный цикл, RAG-слой), `invariants.py` (MCP-поля `ProposedAction`).
 
-`ToolRegistry` — каталог инструментов **всех источников** (local + mcp):
+**Интеграции** (`integrations/`) — новый слой: `mcp/` (config, transport, client, gateway,
+provider, demo_server, scheduler_server, pipeline_server) и `scheduler/` (models, store,
+runner, aggregator — ядро планировщика на stdlib). SDK импортируется только здесь.
 
-- `add_provider` (повторный provider_id → замена с логом) / `unregister_provider` /
-  `get` (неизвестное имя → `KeyError` со списком доступных) / `available_for` (задел
-  фильтров policy) / `snapshot` (текущий, без пересборки) / `refresh`;
-- механика `refresh()`: `discover()` у всех провайдеров → валидация схем (JSON
-  Schema-примитивы: type=object, properties, required) → разрешение коллизий имён
-  (квалифицированные имена; дубликат → последний побеждает, лог) → сборка нового
-  `ToolCatalogSnapshot` (version — монотонный счётчик) → **атомарный swap**: один
-  запрос модели никогда не видит «половину старого и половину нового» каталога;
+**RAG** (`rag/`) — расширяемый RAG-модуль: индексация корпуса, гибридный поиск, блок `[rag]`
+в промте, проверка опоры ответа. Сеть — исключительно `127.0.0.1:11434` (Ollama).
+
+**CLI** (`Kod.py`) — DI с `mcp_enabled=False` по умолчанию; семейство `/mcp` и `/rag`;
+флаги `--mcp`, `--mcp-probe`, `--scheduler*`, `--rag*`, `--no-tools-block`. REPL
+синхронный (async — внутри gateway).
+
+**Служебное** (`dev/`) — «проект про проект»: план-эталон → рабочие планы этапов
+(конец этапа — гейт в следующий) → журнал; красный гейт → карточка ошибки.
+
+---
+
+## Архитектура
+
+### Дерево модулей
+
+
+AI_9/
+├── Kod.py                       # точка входа: DI-композиция (+ mcp_enabled, RagService) + REPL
+│                                #   (+ /mcp…, /rag…, --mcp-probe, run_mcp_probe)
+├── core/                        # ядро агентности
+│   ├── agent.py                 # оркестратор: + mcp_gateway/tool_registry/tool_executor/tool_policy
+│   │                            #   (None при MCP off) + агентный tool-use цикл (_respond_with_tools)
+│   │                            #   + ленивый RAG-слой (check_grounding, _grounding_guard)
+│   ├── llm_client.py            # LLMClient (ABC) + RouterAIClient + MockClient + LLMReply +
+│   │                            #   complete_with_tools (нативный tool-use + fallback-протокол)
+│   ├── profile_router.py        # ProfileRouter — детерминированный выбор профиля
+│   ├── prompt_builder.py        # BLOCK_ORDER + DELIVERABLE + budget + блоки [tools], [rag]
+│   ├── state_machine.py         # строгая машина состояний (MCP/RAG её не трогают)
+│   ├── invariants.py            # Invariant + ConstraintSet + InvariantChecker + ProposedAction
+│   │                            #   (MCP-поля action_type/tool_name/arguments; правило tool.deny.*)
+│   ├── tools.py                 # внутренняя модель инструментов: ToolDescriptor + ToolCallRequest +
+│   │                            #   ToolExecutionResult + ToolExecutionState + ToolProvider (ABC) +
+│   │                            #   ToolCatalogSnapshot (контракты без MCP SDK и без сети)
+│   ├── tool_registry.py         # ToolRegistry — каталог всех источников: add_provider/
+│   │                            #   unregister_provider/get/available_for/snapshot/refresh
+│   ├── tool_policy.py           # ToolPolicy — проверки вызова (enabled/схема/стадия/
+│   │                            #   инварианты/подтверждение) → PolicyDecision
+│   ├── tool_executor.py         # ToolExecutor — policy → gateway.call_tool → результат →
+│   │                            #   аудит tool_audit.jsonl (StateMachine не вызывает)
+│   ├── tool_routing.py          # rank_tools — детерминированный выбор инструмента (RU→EN)
+│   └── tool_pipeline.py         # PipelineStep/Pipeline/run_pipeline — пайплайн из инструментов
+├── integrations/                # слой внешних интеграций (MCP + планировщик)
+│   ├── mcp/
+│   │   ├── config.py            # MCPServerConfig (server_id, transport, command/endpoint, enabled,
+│   │   │                        #   trust_level, allowed/denied_tools, timeout, max_result_bytes)
+│   │   │                        #   + load_servers_config (дефолты: time + weather + scheduler +
+│   │   │                        #   pipeline + demo; битый файл не роняет)
+│   │   ├── transport.py         # MCPTransport (ABC) + StdioMCPTransport + HttpMCPTransport
+│   │   │                        #   (Streamable HTTP, mcp SDK) + FakeMCPTransport; make_transport
+│   │   ├── client.py            # MCPClient: initialize / list_tools / call_tool
+│   │   ├── gateway.py           # MCPGateway: start/stop/connection_state, discover(), call_tool();
+│   │   │                        #   MCPGatewaySync — синхронный фасад (постоянная фоновая задача)
+│   │   ├── provider.py          # MCPToolProvider: discover() + нормализация → ToolDescriptor
+│   │   ├── demo_server.py       # локальный stdio MCP-сервер (get_time, echo, weather_stub)
+│   │   ├── scheduler_server.py  # MCP-сервер планировщика (HTTP :8010)
+│   │   └── pipeline_server.py   # MCP-сервер пайплайна (search/summarize/saveToFile, HTTP :8020)
+│   └── scheduler/               # ядро планировщика (stdlib): models/store/runner/aggregator
+├── memory/                      # 4 слоя + MemoryManager (ToolMemoryPolicy — задел)
+├── rag/                         # RAG-модуль (индексация + гибридный поиск)
+│   ├── config.py / config.json  # RagConfig (+ валидация: эмбеддинги только 127.0.0.1:11434)
+│   ├── types.py / text.py       # Chunk/DocMeta/Hit/… ; нормализация/токенизация/стемминг
+│   ├── corpus.py / chunking.py  # сбор корпуса, sha1/mtime; fixed | structural
+│   ├── embedding.py             # OllamaEmbedder (bge-m3, dim 1024) + HashingEmbedder (фолбэк)
+│   ├── index.py                 # плоский индекс: BM25-постинги + векторы; save/load/version
+│   ├── retrieval.py / rerank.py # bm25 | dense | hybrid (RRF + MMR); LexicalReranker
+│   ├── cache.py                 # SearchCache — LRU+TTL, инвалидация по mtime
+│   ├── grounding.py / eval.py / compare.py  # опора ответа; метрики; сравнение стратегий
+│   ├── service.py               # RagService — фасад для Kod.py/Agent
+│   ├── datasets/                # corpus.list (9 файлов) + queries.jsonl (24 golden)
+│   └── index/                   # рантайм-индекс (в .gitignore): chunks/postings/vectors/meta
+├── storage/
+│   ├── store.py                 # фасад: + mcp_servers/catalog + tool_audit (+ RAG-метрики)
+│   └── db.py                    # ProfileRepository (без изменений)
+├── users/                       # рантайм-хранилище (создаётся при работе)
+│   └── <id>/integrations/mcp/   # servers.json + catalog.json + scheduler/
+├── run.sh / run.desktop         # запуск (+x / пересоздать при переносе)
+├── README.md                    # этот файл — единый источник данных о проекте
+├── Den_log.md                   # журнал (рантайм-артефакт)
+├── tokens.csv                   # CSV-журнал токенов (рантайм-артефакт)
+└── dev/                         # служебное пространство (см. раздел)
+
+
+### Внутренняя модель инструментов (`core/tools.py` — контракты без MCP)
+
+Модель MCP не должна протекать в `core`. `ToolDescriptor` — внутренняя модель агента;
+поля `allowed_stages` / `requires_confirmation` / `risk_level` заполняются дефолтами
+(`allowed_stages` — все рабочие стадии, `requires_confirmation=False`,
+`risk_level="unknown"`) и **используются** `ToolPolicy` при проверке вызова.
+
+python
+# core/tools.py
+@dataclass(frozen=True)
+class ToolDescriptor:
+    name: str                    # квалифицированное: "mcp.weather.search_locations" | "local.<tool>"
+    description: str
+    input_schema: dict
+    source: str                  # "local" | "mcp"
+    provider: str                # server_id (mcp) | "local"
+    original_name: str           # имя тула на сервере ("search_locations")
+    risk_level: str = "unknown"  # policy
+    allowed_stages: frozenset = ALL_WORKING_STAGES  # policy
+    requires_confirmation: bool = False             # policy
+    enabled: bool = True
+
+@dataclass(frozen=True)
+class ToolCallRequest:           # рабочий tools/call
+    name: str
+    arguments: dict
+    call_id: str = ""            # id в протоколе tool-use (связка с LLM)
+
+@dataclass(frozen=True)
+class ToolExecutionResult:       # рабочий tools/call
+    execution_id: str
+    tool: str
+    status: str                  # ToolExecutionState
+    summary: str
+    raw: object | None = None    # сырой ответ — только текущий execution context, не в память
+    is_error: bool = False
+    call_id: str = ""
+
+class ToolExecutionState(str, Enum):   # инфраструктурные состояния вызова (НЕ TaskStage)
+    REQUESTED = "requested"; DENIED = "denied"; WAITING_CONFIRMATION = "waiting_confirmation"
+    RUNNING = "running"; SUCCEEDED = "succeeded"; FAILED = "failed"
+    TIMED_OUT = "timed_out"; CANCELLED = "cancelled"
+
+class ToolProvider(ABC):         # единый интерфейс источников инструментов
+    def discover(self) -> list[ToolDescriptor]: ...
+    def provider_id(self) -> str: ...
+
+@dataclass(frozen=True)
+class ToolCatalogSnapshot:       # атомарная версия каталога
+    version: int
+    tools: tuple[ToolDescriptor, ...]
+    created_at: str              # ISO-время
+
+
+### `ToolRegistry` — каталогизация (`core/tool_registry.py`)
+
+python
+class ToolRegistry:
+    def add_provider(self, provider: ToolProvider) -> None: ...     # повторный id → замена с логом
+    def unregister_provider(self, provider_id: str) -> None: ...
+    def get(self, name: str) -> ToolDescriptor: ...                 # KeyError + понятное сообщение
+    def available_for(self, context) -> list[ToolDescriptor]: ...   # задел: фильтры policy
+    def snapshot(self) -> ToolCatalogSnapshot: ...                  # текущий, без пересборки
+    def refresh(self) -> ToolCatalogSnapshot:
+        # discover() у всех провайдеров → валидация схем (JSON Schema-примитивы) →
+        # разрешение коллизий имён (квалифицированные имена) →
+        # build_and_validate_snapshot() → атомарный swap self._current_snapshot
+
+
+Правила:
+
+- реестр **не проверяет бизнес-правила** и **не вызывает** `StateMachine` — он только
+  каталогизирует;
+- обновление — только полным snapshot (никогда «по одному инструменту»): один запрос
+  модели никогда не видит «половину старого и половину нового» каталога;
 - недоступный провайдер при `refresh()` → его тулы **исключаются** из нового snapshot
   (каталог честен: нет соединения — нет тулов), ошибка логируется, остальные не страдают;
-- реестр **не проверяет бизнес-правила** и **не вызывает** `StateMachine`.
+- `version` — монотонный счётчик; `created_at` — время сборки.
 
 ### MCP-слой (`integrations/mcp/`)
 
-| Модуль | Назначение |
-|---|---|
-| `config.py` | `MCPServerConfig` (frozen: server_id, transport="stdio", command, endpoint, enabled, trust_level="low", allowed_tools/denied_tools, timeout_seconds=30, max_result_bytes=65536) + `load_servers_config`: отсутствующий/битый `servers.json` → дефолт `DEFAULT_SERVERS` (**реальный погодный HTTP-сервер** `weather` + демо-сервер `demo` для тестов), неизвестные ключи игнорируются; endpoint из env `MCP_WEATHER_URL` |
-| `transport.py` | `MCPTransport` (ABC: initialize/list_tools/call_tool/close) + `StdioMCPTransport` (stdio-подпроцесс) + **`HttpMCPTransport`** (Streamable HTTP, `mcp.client.streamable_http.streamable_http_client`, SDK 2.2.0) + `FakeMCPTransport` (детерминированная заглушка: фиксированный список тулов, программируемые отказы/таймауты/результаты вызова); фабрика `make_transport` (выбор по `transport`); фикс чтения схемы `input_schema` (snake_case SDK 2.2.0) |
-| `client.py` | `MCPClient`: `initialize()` (handshake) / `list_tools()` → нормализованные `{name, description, inputSchema}` / **`call_tool()`** → `{isError, text, raw}`; любой сбой → `MCPConnectionError` |
-| `gateway.py` | `MCPConnectionState` (disconnected/connecting/ready/degraded/failed) + `MCPGateway` (async: start/stop/status/discover/**call_tool**) + `MCPGatewaySync` (синхронный фасад на постоянной фоновой задаче — сессии `mcp` SDK привязаны к задаче initialize) |
-| `provider.py` | `MCPToolProvider(ToolProvider)`: provider_id="mcp"; `discover()` → gateway.discover() → тулы с source="mcp", provider=server_id, name=`mcp.<server>.<tool>` |
-| `demo_server.py` | минимальный локальный stdio MCP-сервер на `mcp` SDK: 3 тула — `get_time`, `echo`, `weather_stub`; запуск `python -m integrations.mcp.demo_server` |
+**Конфиг** (`config.py`) — `MCPServerConfig` (server_id, transport, command, endpoint,
+enabled, trust_level, allowed_tools/denied_tools, timeout_seconds, max_result_bytes,
+headers/token_env) + загрузка `users/<id>/integrations/mcp/servers.json`; битый или
+отсутствующий файл → `DEFAULT_SERVERS` (приложение не падает):
+
+- **сервер задания** `time` (`transport="http"`, endpoint из env `MCP_SERVER_URL`, дефолт
+  `http://91.188.212.77:8000/mcp`, `enabled=true`, инструмент `get_time`) — **первым**;
+- **реальный погодный HTTP-сервер** `weather` (endpoint из env `MCP_WEATHER_URL`, дефолт
+  `https://weatherapi.projecteol.ru/mcp/`, `enabled=true`);
+- `scheduler` (`:8010`, env `SCHEDULER_MCP_URL`) и `pipeline` (`:8020`, env
+  `PIPELINE_MCP_URL`) — включаются флагами `SCHEDULER_MCP_ENABLED`/`PIPELINE_MCP_ENABLED`
+  (по умолчанию `False`);
+- демо-сервер `demo` (stdio, `enabled=false` — для детерминированных тестов).
+
+**Транспорт** (`transport.py`) — `MCPTransport` (ABC: `initialize` / `list_tools` /
+`call_tool` / `close`) + `StdioMCPTransport` (обёртка над `mcp` SDK: ленивый импорт SDK,
+stdio-подпроцесс, timeout) + **`HttpMCPTransport`** (Streamable HTTP:
+`mcp.client.streamable_http.streamable_http_client`, SDK 2.2.0) + `FakeMCPTransport`
+(детерминированная заглушка: фиксированный список тулов, программируемые
+`fail_initialize`/`fail_list_tools`/`fail_call`/`error_call`/`timeout` + `set_tools`/
+`set_tool_result`). Фабрика `make_transport(server)` выбирает транспорт по полю
+`transport`. Единый хелпер `_tool_schema` читает схему из `input_schema` (snake_case SDK
+2.2.0) с fallback на `inputSchema`/dict. Таймауты — `asyncio.wait_for`.
+
+**Клиент** (`client.py`) — `MCPClient`: транспорт инжектится, SDK напрямую не импортирует;
+`initialize()` (handshake: protocol version, capabilities), `list_tools()` →
+нормализованные сырые описания `{name, description, inputSchema}`, **`call_tool()`** →
+`{isError, text, raw}`; любой сбой → `MCPConnectionError` (gateway переводит в
+`MCPConnectionState.FAILED`), не `None` и не молчание.
+
+**Шлюз** (`gateway.py`) — `MCPGateway`:
+
+python
+class MCPConnectionState(str, Enum):
+    DISCONNECTED = "disconnected"
+    CONNECTING = "connecting"
+    READY = "ready"
+    DEGRADED = "degraded"    # часть серверов недоступна
+    FAILED = "failed"
+
+class MCPGateway:            # НЕ знает о TaskStage / профилях / памяти
+    async def start(self) -> None            # connect + initialize → READY | FAILED (идемпотентно)
+    async def stop(self) -> None             # закрытие транспортов → DISCONNECTED
+    def status(self) -> dict                 # состояние подключения по серверам
+    async def discover(self) -> list[ToolDescriptor]
+        # list_tools у каждого включённого сервера → нормализация → ToolDescriptor[]
+        # фильтр allowed_tools/denied_tools из MCPServerConfig (изоляция прав через
+        # тулинг: серверу даём только часть тулов)
+    async def call_tool(self, provider, tool_name, arguments, execution_id="") -> ToolExecutionResult
+        # вызов инструмента на сервере provider; сервер не READY → failed-результат (не исключение)
+
+
+Синхронный фасад для REPL: `MCPGatewaySync` — **постоянная фоновая задача** в
+daemon-потоке (все операции исполняются в одной долгоживущей задаче: HTTP/stdio-контексты
+`mcp` SDK держат anyio cancel scope, который обязан войти и выйти в одной задаче) —
+REPL и `--mcp-probe` остаются синхронными. Повторный `start()` идемпотентен.
+
+**Провайдер** (`provider.py`) — `MCPToolProvider(ToolProvider)`: `provider_id() =
+"mcp"`, `discover()` → gateway.discover() → тулы с `source="mcp"`,
+`provider=server_id`, `name=f"mcp.{server_id}.{original_name}"`.
+
+**Демо-сервер** (`demo_server.py`) — минимальный локальный MCP-сервер на `mcp` SDK
+(stdio), 3 тула: `get_time`, `echo`, `weather_stub`. Запуск:
+`python -m integrations.mcp.demo_server`.
 
 **Реальный сервер недели** — `https://weatherapi.projecteol.ru/mcp/` (Streamable HTTP,
 protocol `2025-11-25`, `projecteol-weather v1.0.0`), 3 инструмента:
 `search_locations` (поиск города → координаты), `get_forecast_metadata`,
-`get_weather_forecast` (прогноз по координатам). Endpoint переопределяется env
-`MCP_WEATHER_URL`.
+`get_weather_forecast` (прогноз по координатам).
 
-**Сервер задания Дня 17** — `http://91.188.212.77:8000/mcp` (Streamable HTTP,
-protocol `2025-06-18`, `serverInfo: Time Server`), 1 инструмент:
-`get_time(timezone_name: string = "UTC") -> ISO 8601` — текущее время в указанном
-часовом поясе (IANA: `UTC`, `Europe/Moscow`, `Europe/London`, `Asia/Tokyo`; значение
-по умолчанию `UTC`). Endpoint переопределяется env `MCP_SERVER_URL` (дефолт — боевой
-URL). В `DEFAULT_SERVERS` сервер `time` добавлен **первым** (`transport="http"`,
-`enabled=True`); погодный `weather` и демо `demo` сохранены. Живой вызов:
+**Сервер задания** — `http://91.188.212.77:8000/mcp` (Streamable HTTP, protocol
+`2025-06-18`, `serverInfo: Time Server`), 1 инструмент:
+`get_time(timezone_name: string = "UTC") -> ISO 8601` (IANA: `UTC`, `Europe/Moscow`,
+`Europe/London`, `Asia/Tokyo`). Живой вызов:
 `get_time({"timezone_name":"Europe/Moscow"})` → `2026-09-27T12:52:07+03:00`.
 
 Механика discovery в `MCPGateway.discover()`: `list_tools` у каждого сервера в READY →
-**фильтр прав** (`denied_tools` исключает всегда; непустой `allowed_tools` сужает —
-изоляция прав через тулинг: серверу даём только часть тулов) → нормализация в
-`ToolDescriptor`. Сервер в FAILED → тулов нет; overall-статус: все READY → `ready`,
-есть READY + другие → `degraded`, иначе `failed`, все DISCONNECTED → `disconnected`.
+**фильтр прав** (`denied_tools` исключает всегда; непустой `allowed_tools` сужает) →
+нормализация в `ToolDescriptor`. Сервер в FAILED → тулов нет; overall-статус: все READY
+→ `ready`, есть READY + другие → `degraded`, иначе `failed`, все DISCONNECTED →
+`disconnected`.
 
-**Деградация, не падение**: MCP-сервер недоступен → `MCPConnectionState.FAILED`,
-тулы исключены, но REPL жив — память, профили и машина состояний продолжают работать.
+**Деградация, не падение**: MCP-сервер недоступен → `MCPConnectionState.FAILED`, тулы
+исключены, но REPL жив — память, профили и машина состояний продолжают работать.
 
-### Вызов инструмента и полный LLM tool-use (Ревизия 2)
+### Внутренняя механика вызова и LLM tool-use
 
 - **`tools/call`**: `MCPTransport.call_tool` → `MCPClient.call_tool` →
   `MCPGateway.call_tool(provider, tool, arguments)` → `ToolExecutionResult`
@@ -451,75 +646,85 @@ URL). В `DEFAULT_SERVERS` сервер `time` добавлен **первым**
   `gateway.call_tool` → результат → **аудит** `tool_audit.jsonl` (execution_id, tool,
   status, phase, `arguments_hash` — только отпечаток, не сырые аргументы). **Не**
   вызывает `StateMachine` (инструмент ≠ переход).
+- **`ToolPolicy.check`** (`core/tool_policy.py`): ступени enabled → схема аргументов →
+  стадия (`allowed_stages`) → инварианты (`InvariantChecker` поверх `ProposedAction`) →
+  `requires_confirmation`; итог `PolicyDecision(allowed, reason, needs_confirmation)`.
 - **LLM tool-use**: `LLMClient.complete_with_tools` (нативный OpenAI-совместимый
   `tools`/`tool_calls` + детерминированный fallback-JSON-протокол); блок `[tools]` в
   промте (`ToolPromptPolicy`: `max_tools`/`max_schema_tokens`); агентный цикл
   `Agent._respond_with_tools`: LLM → tool call → `ToolExecutor` → tool-сообщение → LLM
-  → финальный ответ (лимит итераций). Нормализованные вызовы пишутся в рабочую память
-  (`external_actions`); **сырой** ответ — только текущий контекст, никогда в память.
+  → финальный ответ (лимит `max_tool_iterations`). Нормализованные вызовы пишутся в
+  рабочую память (`external_actions`); **сырой** ответ — только текущий контекст, никогда
+  в память.
+- **`rank_tools`** (`core/tool_routing.py`) — детерминированный выбор инструмента
+  (RU→EN-эвристика, без SDK/сети); `/mcp route <текст>` печатает кандидата с обоснованием.
 - **Ручной вызов**: `/mcp call <tool> [{json}]` — прямой вызов через `ToolExecutor`.
 
-Пример живого tool-use (реальный сервер + реальный LLM):
+### Хранение (`Store` — методы фасада)
 
-```text
-Вы [Основная_задача]: найди город Москва
-Агент: Нашёл город Москва (Россия) с координатами 55.75204, 37.61781.
-```
 
-(LLM сам предложил вызов `mcp.weather.search_locations` с `{"query":"Москва"}`;
-результат вернулся в модель; в `tool_audit.jsonl` — запись `succeeded`.)
+users/<user_id>/
+└── integrations/mcp/
+    ├── servers.json            # конфиг серверов (user-scope)
+    └── catalog.json            # снимок ToolCatalogSnapshot (version, tools, created_at)
 
-Пример живого tool-use дня 17 (сервер задания `time` + реальный LLM):
 
-```text
-Вы [Основная_задача]: который час в Москве?
-Агент: В Москве сейчас 12:52 (27 сентября 2026 года).
-```
-
-(LLM сам предложил нативный `tool_call` `mcp.time.get_time` с
-`{"timezone_name":"Europe/Moscow"}` (п. 4.1 — автовызов из приложения); реальный вызов
-на сервере задания вернул `2026-09-27T12:52:07+03:00`; результат вернулся в модель и
-**использован** в финальном ответе (п. 4.2); в `tool_audit.jsonl` — запись `succeeded`
-с `call_id` нативного tool_call; `TaskStage` не изменился.)
-
-### Хранение (`users/<id>/integrations/mcp/`)
-
-- `servers.json` — конфиг серверов (user-scope): `Store.mcp_servers_path` /
-  `read_mcp_servers` / `write_mcp_servers`;
-- `catalog.json` — снимок `ToolCatalogSnapshot` (schema_version, version, tools,
-  created_at): `Store.tool_catalog_path` / `read_tool_catalog` / `save_tool_catalog`;
-  отсутствующий/битый файл → пустой каталог (`schema_version: 1, version: 0, tools: []`);
-  каталог пересохраняется после каждого успешного `/mcp refresh` — переживает перезапуск;
-- `MCPGateway` JSON напрямую не пишет — только через фасад `Store`;
-- задел дня 17+: `users/<id>/tasks/<task>/tool_audit.jsonl` — история вызовов
-  (`append_tool_audit`/`load_tool_audit`), **отдельно** от `transition_log`.
+- `Store.mcp_servers_path/read_mcp_servers/write_mcp_servers` — отсутствующий/битый файл
+  → `None` (дефолтизация у вызывающего: `load_servers_config` → `[DEFAULT_SERVERS]`);
+- `Store.tool_catalog_path/read_tool_catalog/save_tool_catalog` — `read_tool_catalog` при
+  отсутствии/битости → `None` (дефолт: пустой каталог `{"schema_version": 1, "version": 0,
+  "tools": [], "created_at": null}`); каталог пересохраняется после каждого успешного
+  `refresh()` и переживает перезапуск;
+- `users/<id>/tasks/<task>/tool_audit.jsonl` (`append_tool_audit` / `load_tool_audit`,
+  append-only, битые строки пропускаются) — история вызовов, **отдельно** от
+  `transition_log`;
+- `MCPGateway` JSON напрямую не пишет — только через `Store`.
 
 ### DI-композиция и CLI
 
-```python
-build_agent(user_id, mock, mcp_enabled=False)   # MCP off по умолчанию
-# при mcp_enabled (--mcp):
-#   gateway = MCPGatewaySync(load_servers_config(...))
-#   registry = ToolRegistry(); registry.add_provider(MCPToolProvider(gateway))
-#   agent.mcp_gateway = gateway; agent.tool_registry = registry
-# без флага: agent.mcp_gateway is None, agent.tool_registry is None — поведение = den_15
-```
+python
+mcp_enabled = False   # по умолчанию; включается флагом --mcp
 
-Семейство `/mcp` (6 форм; токенов LLM не тратят — LLM в loop не участвует):
+if config.mcp_enabled:
+    gateway = MCPGatewaySync(load_servers_config(store.mcp_servers_path(user_id)))
+    registry = ToolRegistry()
+    registry.add_provider(MCPToolProvider(gateway))
+    policy = ToolPolicy()
+    executor = ToolExecutor(registry, policy, gateway, store=store, checker=agent.checker)
+    agent.mcp_gateway = gateway
+    agent.tool_registry = registry
+    agent.tool_policy = policy
+    agent.tool_executor = executor
+    agent.deliver.add("tools")           # блок [tools] в промте
+    gateway.start(); registry.refresh()  # стартовое discovery + сейв каталога (деградация — не падение)
+# без флага: agent.mcp_gateway/tool_registry/tool_executor is None — поведение = den_15
+# local-провайдер в AI_9 не регистрируется (задел: local.* — только безопасные
+# доменные операции, никогда local.set_stage / local.write_task_state_file)
+
+# RAG (--rag): RagService собирается в Kod.py и передаётся агенту; без --rag rag/ не импортируется
+
+
+Семейство `/mcp` (7 базовых форм + команды дня 20; токенов LLM не тратят):
 
 | Команда | Действие |
 |---|---|
 | `/mcp status` | общее состояние подключения + по серверам + версия каталога и число тулов |
 | `/mcp servers` | сконфигурированные серверы (transport, enabled, trust, allowed/denied) |
-| `/mcp tools` | **результат задания**: список доступных инструментов (имя, description, input-схема) |
+| `/mcp tools` | **список доступных инструментов** (имя, description, input-схема) |
 | `/mcp refresh` | re-discovery → registry.refresh() (атомарный swap) → сейв catalog.json |
-| `/mcp connect <id>` | поднять соединение (по умолчанию — все из servers.json) |
-| `/mcp call <tool> [{json}]` | ← НОВОЕ (Ревизия 2): вызвать инструмент вручную через `ToolExecutor` |
-| `/mcp disconnect` | закрыть соединения (тулы покидают каталог при следующем refresh) |
+| `/mcp connect <id>` | поднять соединение (по умолчанию — все из servers.json); `<id>` — только целевой |
+| `/mcp call <tool> [{json}]` | вызвать инструмент вручную через `ToolExecutor` (policy → вызов → аудит) |
+| `/mcp disconnect` | закрыть соединения (`gateway.stop()` → DISCONNECTED; тулы покидают каталог при refresh) |
+| `/mcp jobs` | список задач планировщика (`state`/`interval`/`runs`) |
+| `/mcp summary [N]` | последняя сохранённая сводка планировщика (без нового запроса к LLM) |
+| `/mcp pipeline <запрос>` | пайплайн `search → summarize → saveToFile` |
+| `/mcp route <текст>` | объяснить выбор инструмента/сервера (без вызова) |
 
-Флаг `--mcp-probe` — **результат задания в one-shot форме**:
+Флаг `--mcp-probe` — **результат задания в one-shot форме**: подключиться → handshake →
+`tools/list` → вывести список инструментов (имя, описание, схема) → корректно закрыться →
+exit 0; при недоступном сервере — понятная ошибка, exit 1.
 
-```text
+text
 $ python Kod.py --mcp-probe
 [MCP] Подключение к серверам: time, weather
 [MCP] Соединение установлено (READY). Список доступных инструментов:
@@ -531,106 +736,83 @@ $ python Kod.py --mcp-probe
     ...
 [MCP] Всего инструментов: 4
 [MCP] Соединение закрыто (DISCONNECTED).
-```
 
-Недоступный сервер → понятная ошибка, exit 1. Без `--mcp`/`/mcp` — MCP-слой не собирается,
-агент работает ровно как `den_15` (регрессия запрещена).
 
-### Сводная механика контроля (главная граница дня)
+Без `--mcp`/`/mcp` — MCP-слой не собирается, агент работает ровно как `den_15`
+(регрессия запрещена).
 
-```
-MCP предоставляет инструменты.      ← integrations/mcp (gateway, provider)
-ToolRegistry каталогизирует.        ← core/tool_registry (атомарный snapshot)
-ToolPolicy фильтрует.               ← задел дня 17+
-InvariantChecker запрещает опасное. ← задел (расширение ProposedAction)
-ToolExecutor управляет вызовом.     ← задел (tools/call)
-MemoryPolicy решает, что запомнить. ← задел (сырое — никогда в память)
-StateMachine решает, можно ли
-менять этап.                        ← БЕЗ ИЗМЕНЕНИЙ: инструмент ≠ переход
-Store сохраняет конфиг и каталог.   ← users/<id>/integrations/mcp/
-```
+### RAG-слой (`rag/`)
 
-## День 20 — планировщик, пайплайн, несколько MCP-серверов
+Расширяемый RAG-модуль: индексация корпуса, гибридный поиск, блок `[rag]` в промпте
+со ссылками и проверка опоры ответа (grounding).
 
-### Планировщик и фоновые задачи (задание 1)
+**Конвейер:**
 
-Фоновое выполнение обеспечивает **внешний worker** (поток stdlib `threading`), а
-**не LLM** — канон куратора «у агента нет heartbeat». LLM участвует только в
-формировании текста сводки (по запросу); готовая сводка отдаётся **без нового
-запроса к модели**.
 
-- **Ядро** (`integrations/scheduler/`): `models.py` (`Job`/`Observation`/`Summary`/
-  `JobState`), `store.py` (`SchedulerStore` через фасад `Store`), `runner.py`
-  (`Scheduler`: `add_job`/`due_jobs`/`run_once`/`start`/`stop`), `aggregator.py`
-  (`aggregate` → `count/min/max/avg/last`). Только stdlib, без MCP SDK.
-- **MCP-сервер** (`integrations/mcp/scheduler_server.py`, по образцу
-  `doc/mcp/mcp-time-server/time_server_http.py`): тулы `schedule_reminder`,
-  `schedule_collection`, `record_observation`, `run_due`, `get_summary`,
-  `latest_summary`, `list_jobs`. HTTP :8010 (env `SCHEDULER_MCP_URL`).
-- **Хранение**: `users/<id>/integrations/mcp/scheduler/{jobs,observations,summaries}.json`.
-- **Запуск 24/7**: `python Kod.py --mcp --scheduler [--scheduler-interval 60]`.
-
-### Пайплайн из MCP-инструментов (задание 2)
-
-Цепочка `search → summarize → saveToFile` (сервер `integrations/mcp/pipeline_server.py`,
-HTTP :8020, env `PIPELINE_MCP_URL`); автовыполнение и передача данных между шагами —
-`core/tool_pipeline.py` (`PipelineStep`/`Pipeline`/`run_pipeline`: результат шага N →
-аргумент N+1 через `input_key`; **не трогает `StateMachine`**). Команда:
-`/mcp pipeline <запрос>`. Каждый вызов идёт через `ToolExecutor` → аудит.
-
-### Несколько MCP-серверов (задание 3)
-
-`DEFAULT_SERVERS`: `time`, `weather`, `scheduler`, `pipeline`, `demo`. Маршрутизация
-по квалификации `mcp.<server>.<tool>` (`MCPGateway` + `ToolRegistry`); длинный флоу —
-несколько последовательных tool-use итераций в одном запросе
-(`Agent._respond_with_tools`, лимит `max_tool_iterations`). Команды: `/mcp servers`,
-`/mcp tools`, `/mcp route <текст>`.
-
-## RAG-индексация и поиск по документам (Ревизия 6)
-
-Поверх MCP-инфраструктуры добавлен **расширяемый RAG-модуль** (`rag/`): агент умеет
-индексировать корпус документов, искать по нему **гибридно** (лексика + векторы) и
-подмешивать найденные источники в промпт **со ссылками**, а ответ — проверять на
-опору на источники (grounding). Требование `Задание_d21.txt`.
-
-### Назначение и конвейер
-
-```
 corpus (rag/datasets/corpus.list) → chunking (fixed | structural)
   → embedding (Ollama bge-m3, локально) → index (BM25 + dense, плоский)
   → retrieval (BM25 ⊕ dense → RRF → реранк → MMR) → блок [rag] в промпте
   → grounding (ответ обязан опираться на найденное)
-```
 
-- **Эмбеддинги — строго локально:** только `127.0.0.1:11434` (Ollama, модель
-  `bge-m3`, dim 1024). Любой другой адрес отвергается валидацией `RagConfig`.
-  При недоступности Ollama — деградация на `HashingEmbedder` (офлайн-фолбэк).
-- **Плоский индекс** без FAISS (решение куратора): BM25-постинги + векторы в
-  `rag/index/` (в `.gitignore`); переживает перезапуск, обновляется **инкрементально**
-  (неизменённые документы не переэмбедятся).
-- **Две стратегии чанкинга** (`fixed` — окно токенов; `structural` — по заголовкам),
-  сравнение — отчёт `dev/logs_reports/stages/rag_chunking_compare.md`.
+
+**Границы модуля:**
+
+- только stdlib; **сеть — исключительно `127.0.0.1:11434`** (Ollama) — валидация в
+  `RagConfig.validate`; при недоступности Ollama — деградация на `HashingEmbedder`;
+- **`rag/` не импортирует `core/`**, а `core/` не импортирует `rag/` — связь только
+  через DI-фасад `RagService` (в `Kod.py`) и готовый текст блока `[rag]`;
+- индекс **глобальный** (`rag/index/`, в `.gitignore`), плоский, без FAISS;
+- новых pip-зависимостей нет; `TaskStage` не затрагивается (RAG ≠ переход).
+
+**Ключевые решения:**
+
 - **Гибрид ≥ каждой компоненты** (BM25, dense) по recall@20 и hit-rate@5; веса RRF
-  подобраны экспериментально (`w_bm25=0.1`, `w_dense=1.0`).
-- **Ссылки обязательны:** при активном RAG каждое утверждение помечается
-  `[doc_id#chunk_id]`; grounding (`off|warn|strict`) ловит выдуманные числа и в
-  `strict` запускает **одну** авто-перегенерацию с фидбэком.
+  подобраны экспериментально (`w_bm25=0.1`, `w_dense=1.0`); порядок:
+  BM25⊕dense → RRF → реранк → дедуп (≤2/док) → MMR (λ=0.7) → top-k;
+- **Ссылки обязательны** при активном RAG: `[doc_id#chunk_id]`; grounding
+  (`off|warn|strict`) ловит выдуманные числа/даты и в `strict` запускает **одну**
+  авто-перегенерацию с фидбэк-промптом;
+- **Кэш поиска** (`SearchCache`): ключ `sha256(model_id | index_version | norm_query |
+  params | filters)`, TTL + инвалидация по mtime затронутых документов, LRU 256;
+- **Multi-query** (опц.): `rephrase` через LLM (фолбэк — детерминированная эвристика
+  по стемам) → поиск по каждому варианту → RRF-склейка;
 - **RAG off по умолчанию:** без `--rag` промпт байт-в-байт прежний, `rag` не
-  импортируется; `TaskStage` не затрагивается (RAG ≠ переход).
+  импортируется (ленивый импорт).
 
-### Как запустить Ollama
+**Сводная механика:**
 
-```bash
+
+./run.sh --rag-ingest
+  → corpus.discover → delta (sha1) → chunking → embedding (Ollama) → index.save
+  → инкрементально: неизменённые документы не переэмбедятся
+
+./run.sh --rag --user alice  →  вопрос
+  → RagService.search (кэш → BM25⊕dense → RRF → реранк → MMR) → context_block
+  → PromptBuilder: блок [rag] ПОСЛЕ [tools], ДО [long_term] (усекается первым)
+  → llm.complete → ответ со ссылками [doc_id#chunk_id]
+  → grounding (strict): провал → ОДНА авто-перегенерация с фидбэком → пометка
+
+/rag check <ответ>  → ground(answer, last_rag_hits) → ok | partial | hallucination
+/rag stats          → индекс, модель, размер, RAM, кэш, латентность p50/p95, Ollama
+
+
+**Как запустить Ollama:**
+
+bash
 # Установка (выполняет оператор, требует sudo) и модель:
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull bge-m3
 # Проверка: сервис слушает только localhost, модель доступна
 curl -s http://127.0.0.1:11434/api/tags
-```
 
-### Команды и флаги
 
-```bash
+> Юнит `ollama.service` (systemd) держит модель `bge-m3` (dim 1024). Управление:
+> `sudo systemctl start|stop|restart|enable|disable ollama`. При остановке RAG
+> деградирует на `HashingEmbedder` (юниты и гейт от Ollama не зависят).
+
+**Команды и флаги:**
+
+bash
 ./run.sh --rag-ingest                       # проиндексировать корпус (одна команда)
 ./run.sh --rag-search "как считается бюджет токенов"   # поиск без LLM (топ-5 со скорами)
 ./run.sh --rag-eval                         # метрики на golden-датасете (recall/hit-rate/mrr/ndcg)
@@ -640,97 +822,241 @@ curl -s http://127.0.0.1:11434/api/tags
 ./run.sh --rag --rag-grounding strict       # проверка опоры ответа (off|warn|strict)
 ./run.sh --rag --rag-multi-query            # переформулирование запроса (тратит токены)
 ./run.sh --rag --no-rag-block               # диагностика: ищет, но в промпт не кладёт
-```
+
 
 **Флаги RAG:** `--rag`, `--no-rag-block`, `--rag-ingest`, `--rag-path <путь>`,
 `--rag-search <запрос>`, `--rag-eval [датасет]`, `--rag-compare`, `--rag-mode {bm25,dense,hybrid}`,
 `--rag-strategy {fixed,structural}`, `--rag-top-k <N>`, `--rag-config <файл>`,
 `--rag-grounding {off,warn,strict}`, `--rag-multi-query`.
 
-**Команды REPL:** `/rag status|on|off|ingest|find|stats|eval|check` — `/rag find`
-показывает скорами, **почему** выбран чанк; `/rag check <ответ>` проверяет опору
-ответа на последние источники (LLM не тратит); `/rag stats` — индекс, модель, размер,
-RAM, кэш (хиты/промахи/TTL), латентность p50/p95, состояние Ollama.
+**Пример вывода:**
 
-### Пример вывода
 
-```
 [RAG] Запрос «как запретить агенту менять технологический стек проекта» (режим hybrid): Найдено источников: 5
-  1. [5a49d570…#5a49d570…#0] core/invariants.py · раздел: … · score=0.0179
-  2. [5a49d570…#5a49d570…#7] core/invariants.py · раздел: … · score=0.0174
-```
+  1. [5a49d570…#0] core/invariants.py · раздел: … · score=0.0179
+  2. [5a49d570…#7] core/invariants.py · раздел: … · score=0.0174
 
-```
+
+
 [RAG] Оценка по rag/datasets/queries.jsonl (k=5, режим hybrid):
   recall@k: 0.9167   hit_rate@k: 0.9167   mrr: 0.7479   ndcg@k: 0.9165
   латентность: p50=147 мс, p95=168 мс
-```
+
+
+### Сводная механика (итог)
+
+
+one-shot результат задания:
+python Kod.py --mcp-probe
+  → load servers.json → HttpMCPTransport(time) → initialize → READY
+  → list_tools → [get_time]  (+ weather: search_locations, get_forecast_metadata, get_weather_forecast)
+  → нормализация → mcp.time.get_time / mcp.weather.search_locations / …
+  → вывод: имя + description + input-схема → close → exit 0
+
+REPL:
+  /mcp connect   → gateway.start() → READY
+  /mcp tools     → registry.snapshot().tools (при пустом — подсказка /mcp refresh)
+  /mcp refresh   → discover() → registry.refresh() (атомарный swap) → Store.save_tool_catalog
+  /mcp call <t>  → ToolExecutor.execute (policy → gateway.call_tool → аудит)
+  /mcp status    → connection_state по серверам + version каталога
+  /mcp disconnect→ gateway.stop() → DISCONNECTED
+
+LLM tool-use:
+  «найди город Москва» / «который час в Москве?» → промт с [tools] + function-calling
+  → LLM сам предлагает tool_call → ToolExecutor.execute → gateway.call_tool (реальный сервер)
+  → результат возвращается в модель → финальный ответ
+  (аудит в tool_audit.jsonl; TaskStage не меняется — инструмент ≠ переход)
+
+RAG:
+  --rag → RagService.search → блок [rag] → ответ со ссылками → grounding (strict: одна авто-перегенерация)
+
+
+**Сводная механика контроля (главная граница):**
+
+
+MCP предоставляет инструменты.      ← integrations/mcp (gateway, provider)
+ToolRegistry каталогизирует.        ← core/tool_registry (атомарный snapshot)
+ToolPolicy фильтрует.               ← core/tool_policy (enabled/схема/стадия/инварианты/подтверждение)
+InvariantChecker запрещает опасное. ← core/invariants (ProposedAction + tool.deny.*)
+ToolExecutor управляет вызовом.     ← core/tool_executor (policy → вызов → аудит)
+MemoryPolicy решает, что запомнить. ← сырое — никогда в память; external_actions — реализовано
+StateMachine решает, можно ли
+менять этап.                        ← БЕЗ ИЗМЕНЕНИЙ: инструмент ≠ переход
+Store сохраняет конфиг и каталог.   ← users/<id>/integrations/mcp/ + tasks/<task>/tool_audit.jsonl
+
+
+### Три кратких описания архитектуры
+
+#### Формула для самой краткой характеристики (1 строка)
+
+> AI_9 — персонализированный CLI stateful-агент (память → профили → инварианты →
+> контролируемый жизненный цикл) с RAG-поиском по документам, к которому MCP
+> подключается не как отдельный фундаментальный слой, а как интеграционный источник
+> инструментов: gateway соединяет (реальный HTTP-сервер), provider нормализует,
+> registry каталогизирует, executor вызывает и аудитирует, LLM сам предлагает вызовы —
+> а контроль остаётся за существующими механизмами.
+
+#### Краткое и точное описание (одно предложение)
+
+> AI_9 — CLI stateful-агент (RouterAI, step-3.5-flash), расширенный полным вертикальным
+> срезом MCP-подсистемы (соединение с реальным MCP-сервером по Streamable HTTP,
+> handshake initialize, discovery tools/list, нормализация тулов во внутреннюю модель
+> ToolDescriptor, каталогизация в ToolRegistry с атомарным snapshot и персистентностью
+> через Store, настоящий вызов инструмента tools/call через ToolExecutor с policy и
+> аудитом и полный LLM tool-use) и RAG-модулем (индексация корпуса, локальные
+> эмбеддинги bge-m3, гибридный поиск BM25⊕dense→RRF→реранк→MMR, блок `[rag]` в промпте
+> со ссылками и проверка опоры ответа); результат — вывод списка инструментов
+> (`--mcp-probe` / `/mcp tools`), вызов инструмента по запросу пользователя и ответ со
+> ссылками на источники.
+
+#### Полная картина архитектуры с механикой частей
+
+Общая формула: пять основ (память → персонализация → состояние → инварианты →
+контролируемый жизненный цикл) + интеграционный модуль MCP как внешний источник
+инструментов, подключённый к универсальному ToolRegistry и защищённый существующими
+правилами, + RAG-модуль как слой доступа к локальным знаниям с проверкой опоры.
+
+1. **Хранилище (storage/)** — «где всё лежит». Каноническая иерархия `users/<id>/…` +
+   ветка `integrations/mcp/`: `servers.json` (какие серверы, транспорт, таймауты,
+   allowed/denied_tools) и `catalog.json` (снимок каталога: schema_version, version,
+   tools, created_at). Механика устойчивости — битый/отсутствующий файл → схема по
+   умолчанию, не падение. Gateway JSON напрямую не пишет — только через фасад Store.
+   `tasks/<task>/tool_audit.jsonl` — история вызовов (task-scope), отдельно от
+   `transition_log`.
+
+2. **Память (memory/)** — «что агент помнит». 4 слоя, MERGE/append только через
+   MemoryManager, дозированная доставка + токен-бюджет. MCP-политика памяти: сырой ответ
+   → только текущий execution context; краткое резюме → short_term; нормализованный итог
+   → working (`external_actions[]`); важный факт → long_term только по политике; секреты
+   — никогда; профиль MCP менять не может.
+
+3. **Ядро (core/)** — «кто решает». Прежние сущности без регрессии. Инструменты:
+   - `tools.py` — контракты: ToolDescriptor (name, description, input_schema, source,
+     provider, original_name + policy-поля risk_level / allowed_stages /
+     requires_confirmation), ToolCallRequest / ToolExecutionResult, ToolExecutionState,
+     ToolProvider (ABC), ToolCatalogSnapshot.
+   - `tool_registry.py` — каталог: add_provider / unregister_provider / get /
+     available_for / snapshot / refresh. Механика refresh: discover() у всех провайдеров
+     → валидация схем → разрешение коллизий → сборка нового snapshot → атомарный swap.
+     Реестр не проверяет бизнес-правила и не зовёт StateMachine. Недоступный провайдер →
+     его тулы исключаются, остальные живы.
+   - `tool_policy.py` — проверки вызова: enabled → схема → стадия → инварианты →
+     подтверждение → PolicyDecision.
+   - `tool_executor.py` — исполнение: policy → gateway.call_tool → результат → аудит
+     tool_audit.jsonl; StateMachine не вызывает.
+   - `tool_routing.py` / `tool_pipeline.py` — выбор инструмента и пайплайн.
+   - `llm_client.py` — LLMReply + complete_with_tools (нативный tool-use + fallback);
+     `prompt_builder.py` — блоки [tools]/[rag]; `agent.py` — агентный цикл
+     _respond_with_tools + RAG-слой; `invariants.py` — ProposedAction + MCP-поля +
+     правило tool.deny.*.
+
+4. **Интеграции (integrations/)** — «как достучаться до внешнего мира».
+   - mcp/config: MCPServerConfig + загрузка servers.json с дефолтами (time + weather +
+     scheduler + pipeline + demo).
+   - mcp/transport: ABC + StdioMCPTransport (обёртка над mcp SDK) + HttpMCPTransport
+     (Streamable HTTP) + FakeMCPTransport (программируемые списки/отказы/таймауты).
+     Фабрика make_transport; SDK импортируется только в transport.py (+ demo_server.py).
+   - mcp/client: initialize / list_tools / call_tool; сбой → MCPConnectionError.
+   - mcp/gateway: start/stop/status/discover/call_tool; MCPConnectionState; фильтр
+     allowed/denied_tools; НЕ знает о TaskStage/профилях/памяти. Синхронный фасад
+     MCPGatewaySync — постоянная фоновая задача для REPL и --mcp-probe.
+   - mcp/provider: нормализация → ToolDescriptor (`mcp.<server>.<tool>`).
+   - mcp/demo_server + mcp/scheduler_server + mcp/pipeline_server + scheduler/ — локальные
+     MCP-серверы и ядро планировщика.
+
+5. **RAG (rag/)** — «что агент знает из документов». config/validate (только
+   `127.0.0.1:11434`) → corpus/chunking (fixed|structural) → embedding (Ollama bge-m3 +
+   HashingEmbedder-фолбэк) → index (плоский: BM25-постинги + векторы, save/load) →
+   retrieval/rerank (bm25|dense|hybrid: RRF + MMR) → cache (LRU+TTL, инвалидация по
+   mtime) → grounding/eval/compare → service (RagService). Блок `[rag]` в промте — после
+   `[tools]`, до `[long_term]`; связь с ядром — только через DI.
+
+6. **Оркестратор и CLI** — «как этим пользуются». Agent — расширение: self.mcp_gateway /
+   self.tool_registry / self.tool_policy / self.tool_executor (None при выключенном MCP)
+   + агентный tool-use цикл; жизненный цикл не изменён (/plan → /approve → /step|/run →
+   validation → done; инварианты; профили; память). DI: build_agent() при mcp_enabled
+   строит MCPGatewaySync + MCPToolProvider + ToolPolicy + ToolExecutor, регистрирует
+   провайдер, добавляет слой tools в доставку и делает стартовое gateway.start()/
+   registry.refresh(); RagService собирается в Kod.py при `--rag`. Команды: `/mcp …`,
+   `/rag …`; флаги `--mcp`, `--mcp-probe`, `--scheduler*`, `--rag*`. `/mcp`- и
+   `/rag`-команды токенов LLM не тратят.
+
+7. **Служебное пространство (dev/)** — «проект про проект». Миграция по процессной модели
+   «план-эталон → рабочие планы этапов → журнал»; красный гейт → карточка ошибки.
+   Тестовый контур: L1 импорт; L2 unit_runner (244 OK); L3 smoke; L4 scenario; гейт
+   33/33; приёмка 54/54 — всё без живого ключа и сети, в `.tmp/`, `users/` не
+   затрагивается.
+
+**Инвариант всей системы**: детерминизм недетерминированной LLM даёт код — внешний мир
+подключается через адаптер, который не имеет права менять внутреннее состояние агента.
+
+---
 
 ## Команды REPL
 
-Команды дней 11–15 сохранены полностью; новое — семейство `/mcp` (6 форм).
-
-| Команда | Действие | Пункт приёмки |
-|---|---|---|
-| `/memory` | снимок «какие данные в каком типе памяти» (report по всем слоям) | 4 |
-| `/profile` | активный профиль: `style` / `constraints` / `context` (обратно совместимо с Днём 11) | 2 |
-| `/profile list` | профили пользователя (`*` default, `>` активный) | 20 |
-| `/profile show <id>` | полный JSON профиля | 20 |
-| `/profile use <id>` | переключить активный профиль сессии | 22 |
-| `/profile new <id>` | создать профиль (мини-интервью) и активировать его | 20 |
-| `/profile route <текст>` | показать решение роутера (explain), НЕ переключая | 22 |
-| `/profile auto on\|off` | авто-роутинг профиля по каждому запросу | 22 |
-| `/tasks` | список задач + отметка активной (`*`) | 8 |
-| `/task <имя>` | переключить/создать задачу + загрузка её `task_state.json` | 8 |
-| `/task retry` | восстановление из `failed` → `planning` (steps/results/error очищены, снова `/approve`) | 25 |
-| `/plan <цель>` | `new → planning`, план строится и **ожидает утверждения** | 23, 31 |
-| `/approve` | утвердить план (`planning → plan_approved`); из других стадий — отказ с объяснением | 31, 33 |
-| `/goto <этап>` | попытка явного перехода (демо контроля: недопустимый → отказ с правилом, состояние не меняется) | 33, 34 |
-| `/transitions` | карта `ALLOWED_TRANSITIONS` + журнал `transition_log` + счётчик отказов | 32 |
-| `/step` | один проход автомата | 23 |
-| `/run` | крутить автомат до `done`/`failed`/`paused`; из `planning` — останавливается | 25 |
-| `/pause` | пауза на любой рабочей стадии (`previous_stage` сохраняется) | 24 |
-| `/resume` | продолжение с того же этапа и шага, без повторных объяснений | 24, 35 |
-| `/deliver <слои>` | набор доставляемых слоёв, напр. `/deliver profile,working` | 5 |
-| `/compare` | ответ с `long_term` и без него — демонстрация влияния памяти | 14 |
-| `/summary` | резюме сессий текущей задачи (`sessions_resume.md`) | 12 |
-| `/state` | снимок `TaskState` + разрешённые переходы + счётчик отказов + карта | 11, 23, 32 |
-| `/invariants` | список инвариантов задачи (`on/off`, id, category, severity, description) | 26 |
-| `/invariant add <id> <category> <текст>` | добавить инвариант (сейв `invariants.json`) | 26 |
-| `/invariant set <id> <текст> [--yes]` | изменить инвариант — без `--yes` требует подтверждения | 30 |
-| `/invariant on\|off <id>` | включить/выключить инвариант | 28 |
-| `/check <действие>` | прогнать `ProposedAction` через `InvariantChecker` (демонстрация, без исполнения) | 28 |
-| `/tokens` | локальная оценка токенов сессии + указание на CSV-журнал | 16 |
-| `/cost` | стоимость обменов (локальная оценка, ₽) | 16 |
-| `/mcp status` | ← НОВОЕ (Д16): состояние MCP-подключения + версия каталога | 37 |
-| `/mcp servers` | ← НОВОЕ (Д16): сконфигурированные MCP-серверы | — |
-| `/mcp tools` | ← НОВОЕ (Д16): **список доступных инструментов** (результат задания) | 38, 39 |
-| `/mcp refresh` | ← НОВОЕ (Д16): re-discovery + атомарный swap + сейв catalog.json | 38 |
-| `/mcp connect <id>` | ← НОВОЕ (Д16): поднять соединение с MCP-сервером | 37 |
-| `/mcp call <tool> [{json}]` | ← НОВОЕ (Ревизия 2): вызвать инструмент вручную | 44 |
-| `/mcp disconnect` | ← НОВОЕ (Д16): закрыть MCP-соединения | — |
-| `/mcp summary [N]` | ← НОВОЕ (Д20): последняя сохранённая сводка планировщика (без нового запроса к LLM) | 1.4 |
-| `/mcp jobs` | ← НОВОЕ (Д20): задачи планировщика (`state`/`interval`/`runs`) | 1.3 |
-| `/mcp pipeline <запрос>` | ← НОВОЕ (Д20): пайплайн `search → summarize → saveToFile` | 2.3 |
-| `/mcp route <текст>` | ← НОВОЕ (Д20): объяснить выбор инструмента/сервера (без вызова) | 3.2 |
-| `/rag status` | ← НОВОЕ (Ревизия 6): состояние RAG (вкл/выкл, режим, топ-k, grounding, индекс) | — |
-| `/rag on\|off` | ← НОВОЕ (Ревизия 6): включить/выключить RAG в сессии | — |
-| `/rag ingest` | ← НОВОЕ (Ревизия 6): проиндексировать корпус (инкрементально) | — |
-| `/rag find <запрос>` | ← НОВОЕ (Ревизия 6): поиск со скорами — **почему** выбран чанк | — |
-| `/rag check <ответ>` | ← НОВОЕ (Ревизия 6): проверка опоры ответа на последние источники (без LLM) | — |
-| `/rag stats` | ← НОВОЕ (Ревизия 6): индекс, модель, RAM, кэш, латентность p50/p95, Ollama | — |
-| `/rag eval` | ← НОВОЕ (Ревизия 6): метрики на golden-датасете | — |
-| `/help` | список команд | — |
-| `/exit` | `save_state()` (+ сейв `task_state.json` с `transition_log`) и выход | 12, 25 |
+| Команда | Действие |
+|---|---|
+| `/memory` | снимок «какие данные в каком типе памяти» (report по всем слоям) |
+| `/profile` | активный профиль: `style` / `constraints` / `context` |
+| `/profile list` | профили пользователя (`*` default, `>` активный) |
+| `/profile show <id>` | полный JSON профиля |
+| `/profile use <id>` | переключить активный профиль сессии |
+| `/profile new <id>` | создать профиль (мини-интервью) и активировать его |
+| `/profile route <текст>` | показать решение роутера (explain), НЕ переключая |
+| `/profile auto on\|off` | авто-роутинг профиля по каждому запросу |
+| `/tasks` | список задач + отметка активной (`*`) |
+| `/task <имя>` | переключить/создать задачу + загрузка её `task_state.json` |
+| `/task retry` | восстановление из `failed` → `planning` (steps/results/error очищены) |
+| `/plan <цель>` | `new → planning`, план строится и **ожидает утверждения** |
+| `/approve` | утвердить план (`planning → plan_approved`); из других стадий — отказ |
+| `/goto <этап>` | попытка явного перехода (демо контроля: недопустимый → отказ с правилом) |
+| `/transitions` | карта `ALLOWED_TRANSITIONS` + журнал `transition_log` + счётчик отказов |
+| `/step` | один проход автомата |
+| `/run` | крутить автомат до `done`/`failed`/`paused`; из `planning` — останавливается |
+| `/pause` | пауза на любой рабочей стадии (`previous_stage` сохраняется) |
+| `/resume` | продолжение с того же этапа и шага, без повторных объяснений |
+| `/deliver <слои>` | набор доставляемых слоёв, напр. `/deliver profile,working` |
+| `/compare` | ответ с `long_term` и без него — демонстрация влияния памяти |
+| `/summary` | резюме сессий текущей задачи (`sessions_resume.md`) |
+| `/state` | снимок `TaskState` + разрешённые переходы + счётчик отказов + карта |
+| `/invariants` | список инвариантов задачи (`on/off`, id, category, severity, description) |
+| `/invariant add <id> <category> <текст>` | добавить инвариант (сейв `invariants.json`) |
+| `/invariant set <id> <текст> [--yes]` | изменить инвариант — без `--yes` требует подтверждения |
+| `/invariant on\|off <id>` | включить/выключить инвариант |
+| `/check <действие>` | прогнать `ProposedAction` через `InvariantChecker` (демонстрация) |
+| `/tokens` | локальная оценка токенов сессии + указание на CSV-журнал |
+| `/cost` | стоимость обменов (локальная оценка, ₽) |
+| `/mcp status` | состояние MCP-подключения + версия каталога |
+| `/mcp servers` | сконфигурированные MCP-серверы |
+| `/mcp tools` | **список доступных инструментов** (результат задания) |
+| `/mcp refresh` | re-discovery + атомарный swap + сейв catalog.json |
+| `/mcp connect <id>` | поднять соединение с MCP-сервером (по умолчанию — все) |
+| `/mcp call <tool> [{json}]` | вызвать инструмент вручную через `ToolExecutor` |
+| `/mcp disconnect` | закрыть MCP-соединения |
+| `/mcp summary [N]` | последняя сохранённая сводка планировщика (без нового запроса к LLM) |
+| `/mcp jobs` | задачи планировщика (`state`/`interval`/`runs`) |
+| `/mcp pipeline <запрос>` | пайплайн `search → summarize → saveToFile` |
+| `/mcp route <текст>` | объяснить выбор инструмента/сервера (без вызова) |
+| `/rag status` | состояние RAG (вкл/выкл, режим, топ-k, grounding, индекс) |
+| `/rag on\|off` | включить/выключить RAG в сессии |
+| `/rag ingest` | проиндексировать корпус (инкрементально) |
+| `/rag find <запрос>` | поиск со скорами — **почему** выбран чанк |
+| `/rag check <ответ>` | проверка опоры ответа на последние источники (без LLM) |
+| `/rag stats` | индекс, модель, RAM, кэш, латентность p50/p95, Ollama |
+| `/rag eval` | метрики на golden-датасете |
+| `/help` | список команд |
+| `/exit` | `save_state()` (+ сейв `task_state.json` с `transition_log`) и выход |
 
 Без активной задачи `/step`, `/run`, `/pause`, `/resume`, `/approve`, `/goto` печатают
 подсказку «сначала `/plan <цель>`». `EOFError` / `KeyboardInterrupt` тоже вызывают
 `save_state()` — состояние не теряется. Неизвестная команда и исключения цикла логируются
 и не прерывают сессию. `/mcp`-команды без флага `--mcp` печатают «MCP-слой выключен».
 
+---
+
 ## Запуск
 
-```bash
+bash
 # Через обёртку (активирует venv недели AI_9, работает из любого каталога)
 ./run.sh                     # интерактивный REPL — спросит user_id
 ./run.sh --user alice        # сразу идентификация alice
@@ -742,27 +1068,31 @@ python Kod.py --mock --user alice
 # Персонализация
 ./run.sh --user alice --profile chemist    # активный профиль на старте
 
-# MCP (День 16 → День 17)
+# MCP
 python Kod.py --mcp-probe                  # one-shot: подключиться → список тулов → выйти
 ./run.sh --user alice --mcp                # REPL с MCP-слоем + полным LLM tool-use (/mcp …)
 MCP_SERVER_URL=http://91.188.212.77:8000/mcp python Kod.py --mcp-probe  # сервер задания (get_time)
 MCP_WEATHER_URL=https://weatherapi.projecteol.ru/mcp/ python Kod.py --mcp-probe  # явный endpoint погоды
 python -m integrations.mcp.demo_server     # локальный MCP-сервер (stdio) отдельно
 
-# День 20 — планировщик 24/7 и новые серверы
+# Планировщик 24/7 и новые серверы
 python Kod.py --mcp --scheduler            # фоновый worker 24/7 (сбор + сводка)
 python Kod.py --mcp --scheduler --scheduler-interval 5   # укороченный интервал (демо)
 python -m integrations.mcp.scheduler_server             # MCP-сервер планировщика (HTTP :8010)
 python -m integrations.mcp.pipeline_server              # MCP-сервер пайплайна (HTTP :8020)
-```
 
-**Флаги (16):** `--user <id>`, `--profile <id>`, `--deliver <слои>` (по умолчанию полный
-канонический набор `DELIVERABLE`), `--mock`, `--fresh`, `--log`, `--token-log`,
-`--max-tokens`, `--price-in` / `--price-out` (₽ за 1M, по умолчанию 11 / 33), `--budget <N>`,
-`--memory-dir` (перенос хранилища — используется тестами для изоляции), **`--mcp`**
-(включить MCP-слой в REPL), **`--mcp-probe`** (one-shot результат задания),
-**`--scheduler`** (фоновый worker 24/7, День 20), **`--scheduler-interval <сек>`**.
-**Флаги RAG (Ревизия 6):** `--rag`, `--no-rag-block`, `--rag-ingest`, `--rag-path <путь>`,
+# RAG
+./run.sh --rag-ingest                       # проиндексировать корпус
+./run.sh --rag --user alice                 # REPL с блоком [rag]
+
+
+**Флаги:** `--user <id>`, `--profile <id>`, `--deliver <слои>` (по умолчанию `DELIVERABLE`),
+`--mock`, `--fresh`, `--log`, `--token-log`, `--max-tokens`, `--price-in` / `--price-out`
+(₽ за 1M, по умолчанию 11 / 33), `--budget <N>`, `--memory-dir` (перенос хранилища —
+используется тестами для изоляции), `--mcp` (включить MCP-слой в REPL), `--mcp-probe`
+(one-shot результат задания), `--no-tools-block`, `--scheduler` (фоновый worker 24/7),
+`--scheduler-interval <сек>`.
+**Флаги RAG:** `--rag`, `--no-rag-block`, `--rag-ingest`, `--rag-path <путь>`,
 `--rag-search <запрос>`, `--rag-eval [датасет]`, `--rag-compare`, `--rag-mode {bm25,dense,hybrid}`,
 `--rag-strategy {fixed,structural}`, `--rag-top-k <N>`, `--rag-config <файл>`,
 `--rag-grounding {off,warn,strict}`, `--rag-multi-query`.
@@ -772,10 +1102,12 @@ python -m integrations.mcp.pipeline_server              # MCP-сервер па�
 `run.desktop` содержит абсолютные `Exec=`/`Path=` — после переноса на другой хост
 его нужно пересоздать (в `.desktop` переменные окружения не раскрываются).
 
+---
+
 ## Агентный цикл
 
-```
-старт → DI-сборка build_agent(mcp_enabled=--mcp) → идентификация user_id
+
+старт → DI-сборка build_agent(mcp_enabled=--mcp) (+ RagService при --rag) → идентификация user_id
       ├─ профиль есть → load_state(): long_term → задача → task_state.json
       └─ нет профиля  → интервью (style/constraints/context) → initialize_user()
       → активный профиль (--profile) → deliver (--deliver ∩ DELIVERABLE)
@@ -787,83 +1119,97 @@ python -m integrations.mcp.pipeline_server              # MCP-сервер па�
 MCP:    --mcp-probe → start → READY → discover → печать списка → stop → exit 0
         /mcp connect|tools|refresh|status|disconnect (токенов LLM не тратят;
         недоступный сервер → FAILED/DEGRADED, REPL жив — деградация, не падение)
+        LLM tool-use: _respond_with_tools (LLM → tool call → ToolExecutor → tool-сообщение → LLM)
 RAG:    --rag → RagService.search (кэш → BM25⊕dense → RRF → реранк → MMR)
         → блок [rag] в промпте (после [tools]) → ответ со ссылками → grounding
         (strict: провал → одна авто-перегенерация); без --rag rag/ не импортируется
 выход:  save_state() + сейв task_state.json (включая transition_log)
-```
+
 
 LLM за интерфейсом: `LLMClient (ABC)` → `RouterAIClient` (живой: POST + Bearer,
 retry на HTTP 429 с задержками 2 → 4 → 8 сек, таймаут 30 сек, любой сбой → `None`)
 и `MockClient` (детерминированная заглушка). Агент зависит только от абстракции —
 провайдер инжектится на старте.
 
-## Архитектура
+---
 
-```
-./
-├── Kod.py                       # точка входа: DI-композиция (+ mcp_enabled) + REPL
-│                                #   (+ /mcp-семейство, --mcp, --mcp-probe, run_mcp_probe)
-├── core/                        # ядро агентности
-│   ├── agent.py                 # stateful-оркестратор (+ mcp_gateway/tool_registry = None)
-│   ├── invariants.py            # Invariant + ConstraintSet + InvariantChecker + RuleBasedChecker
-│   ├── llm_client.py            # LLMClient (ABC) + RouterAIClient + MockClient
-│   ├── profile_router.py        # ProfileRouter — детерминированный выбор профиля
-│   ├── prompt_builder.py        # BLOCK_ORDER (+invariants), build(ctx, deliver, budget)
-│   ├── state_machine.py         # строгая машина состояний (MCP её не трогает)
-│   ├── tools.py                 # ← Д16: внутренняя модель инструментов (без MCP SDK)
-│   └── tool_registry.py         # ← Д16: ToolRegistry — каталог + атомарный snapshot
-├── integrations/                # ← Д16: новый слой внешних интеграций
-│   └── mcp/
-│       ├── config.py            # MCPServerConfig + load_servers_config (servers.json)
-│       ├── transport.py         # MCPTransport ABC + StdioMCPTransport (mcp SDK) + Fake
-│       ├── client.py            # MCPClient: initialize / list_tools
-│       ├── gateway.py           # MCPGateway + MCPConnectionState + MCPGatewaySync
-│       ├── provider.py          # MCPToolProvider — нормализация → ToolDescriptor
-│       └── demo_server.py       # локальный stdio MCP-сервер (3 тула)
-├── memory/                      # модель памяти (4 слоя + MemoryManager) — без изменений
-├── rag/                         # ← Ревизия 6: RAG-модуль (индексация + поиск)
-│   ├── config.py                # RagConfig (+ валидация: эмбеддинги только localhost)
-│   ├── corpus.py                # discover/delta — сбор корпуса, deny-список
-│   ├── chunking.py              # две стратегии: fixed | structural
-│   ├── embedding.py             # OllamaEmbedder (bge-m3) + HashingEmbedder (фолбэк)
-│   ├── index.py                 # плоский индекс: BM25-постинги + векторы, save/load
-│   ├── retrieval.py             # bm25 | dense | hybrid (RRF + MMR)
-│   ├── rerank.py                # LexicalReranker (интерфейс под cross-encoder)
-│   ├── cache.py                 # LRU+TTL кэш поиска (инвалидация по mtime)
-│   ├── grounding.py             # проверка опоры ответа на источники
-│   ├── eval.py / compare.py     # метрики и сравнение стратегий
-│   ├── service.py               # RagService — фасад для Kod.py/Agent
-│   └── datasets/                # corpus.list + queries.jsonl (golden)
-├── storage/
-│   ├── store.py                 # фасад: + mcp_servers/catalog + задел tool_audit
-│   └── db.py                    # ProfileRepository (SQLite) — без изменений
-├── users/                       # рантайм-данные (+ integrations/mcp/ у пользователя)
-└── dev/                         # служебное: миграция, тесты, Проверка.md
-```
+## Тестирование и приёмка
 
-Направление зависимостей однонаправленное: `Kod.py` → `core/` → `memory/` → `storage/`;
-`integrations/` и `rag/` — сбоку, подключаются только DI-композицией в `Kod.py`.
-`mcp` SDK импортируется только в `integrations/mcp/`; `core`/`memory`/`storage` его не
-импортируют никогда. **`rag/` не импортирует `core/`, а `core/` не импортирует `rag/`** —
-связь через DI-фасад `RagService` и готовый текст блока `[rag]`. Слои памяти и ядро ФС
-напрямую не трогают — только через фасад `Store`.
+Всё — **без живого ключа** (`API_KEY=test-key`, `MockClient`, `FakeMCPTransport`),
+тестовые данные пишутся только в `dev/tests_debug/.tmp/` (в `.gitignore`), рабочие
+`users/` не затрагиваются. `pytest` в venv недели отсутствует, поэтому L2 идёт через
+собственный лёгкий раннер `unit_runner.py`.
 
-## Демонстрации задания
+| Уровень | Команда | Результат |
+|---|---|---|
+| L1 | `python -m py_compile Kod.py core/*.py memory/*.py storage/*.py integrations/mcp/*.py` | exit 0 |
+| L2 | `env -u API_KEY python dev/tests_debug/unit_runner.py` | **244 OK, 0 FAIL** (18 модулей) |
+| L3 | `API_KEY=test-key python dev/tests_debug/smoke.py` | SMOKE OK, exit 0 |
+| L4 | `API_KEY=test-key python dev/tests_debug/scenario.py` | SCENARIO OK, exit 0 |
+| Гейт | `API_KEY=test-key bash dev/tests_debug/check_acceptance.sh` | **33 из 33 ✅, exit 0** |
+| Интеграция | `timeout 60 python Kod.py --mcp-probe` (реальный HTTP-сервер) | READY → 4 тула (1 `time` + 3 `weather`) → DISCONNECTED, exit 0 (не гейт — живой прогон) |
+| Живой tool-use | `printf 'который час в Москве?\n/exit\n' \| python Kod.py --user u --mcp` | LLM вызывает `mcp.time.get_time` → ответ (не гейт — живой прогон) |
+
+**Состав тестовых модулей:**
+
+- `unit/test_mcp.py` — контракты (квалифицированное имя, source/provider); discovery-
+  нормализация; реестр (add/refresh/snapshot, коллизии, unregister, get-ошибка);
+  атомарность (version монотонный); недоступный сервер (FAILED, тулы исключены,
+  остальные живы); фильтр allowed/denied; HTTP-транспорт + фикс схемы `input_schema`;
+  `tools/call` + policy + аудит; персистентность (round-trip, битый файл →
+  schema_version=1); **MCP не трогает состояние** (TaskStage не изменился,
+  transition_log пуст); **MCP off по умолчанию**; конфиг (дефолт/битый/неизвестные
+  ключи); LLM tool-use (парсеры, агентный цикл, блок `[tools]`);
+- `unit/test_rag_*.py` — интеграция (16), grounding (18), cache (15);
+- L4 сценарии — `scenario_mcp_discovery`, `scenario_llm_tool_use`, `scenario_tool_denied`,
+  `scenario_multiserver_flow` + базовые (+ `scen_rag.md` — сценарий ручной демонстрации);
+- гейт `check_acceptance.sh` — **33 проверки** (25 прежних + 8 RAG: импорт `rag`; индекс
+  строится и переживает save/load; поиск отдаёт хит с метаданными; две стратегии
+  чанкинга; отчёт сравнения; без `--rag` нет `[rag]`; `TaskStage` не затронут;
+  `--rag-eval` hit-rate@5 ≥ 0.80). Идемпотентен, `users/` не трогает.
+
+**Человеческая версия приёмки** — **54 критерия, 54/54 зелёных** — в
+[`dev/Проверка.md`](dev/Проверка.md):
+
+- **строки 1–35** — комплектность и сборка, четыре слоя памяти, иерархия хранилища,
+  явная маршрутизация, дозированная доставка, идентификация и интервью, задачи и
+  переходы, промт блоками, LLM за интерфейсом, state machine, resume, неизменяемые
+  сообщения, демонстрации, текстовое описание, уроки, тесты без ключа, задел инвариантов,
+  несколько профилей/роутер, формализованное состояние, пауза/продолжение,
+  персистентность, инварианты (хранение/промт/отказ/конфликт/подтверждение),
+  контролируемые переходы (набор состояний, карта, блокировка кодом, реакция,
+  продолжение после паузы);
+- **строки 36–40: подключение MCP** — SDK/демо-сервер, соединение устанавливается,
+  список корректно возвращается, список выводится кодом, регрессия MCP off;
+- **строки 41–48: реальное подключение и полный LLM tool-use** — HTTP-транспорт/конфиг,
+  настоящее соединение, настоящий список инструментов, настоящий вызов `tools/call`,
+  контроль вызова и аудит, полный LLM tool-use, инструмент ≠ переход, регрессия MCP off;
+- **строки 49–54: инструмент задания** — сервер `time` в конфиге, реальное discovery
+  `get_time`, реальный вызов `get_time`, LLM tool-use «который час в Москве?», аудит и
+  «инструмент ≠ переход», регрессия MCP off.
+
+Машиночитаемый дубль — `dev/tests_debug/check_acceptance.sh`. Сценарии живой
+демонстрации куратору — `dev/tests_debug/scenario/scen_1.md` и `scen_rag.md`,
+`dev/Проверка.md` (три сценария дня 20).
+
+### Демонстрации задания
 
 | Что проверяем | Как посмотреть | Что видно |
 |---|---|---|
 | **Соединение устанавливается** | `python Kod.py --mcp-probe` | «[MCP] Соединение установлено (READY)» — handshake initialize прошёл (реальный сервер) |
-| **Список инструментов корректно возвращается** | `--mcp-probe` или `/mcp tools` после `/mcp refresh` | 4 тула: `mcp.time.get_time` (сервер задания) + `mcp.weather.search_locations`, `mcp.weather.get_forecast_metadata`, `mcp.weather.get_weather_forecast` — имя, description, input-схема |
+| **Список инструментов корректно возвращается** | `--mcp-probe` или `/mcp tools` после `/mcp refresh` | 4 тула: `mcp.time.get_time` + `mcp.weather.search_locations`, `get_forecast_metadata`, `get_weather_forecast` — имя, description, input-схема |
 | **Список выводится кодом** | `python Kod.py --mcp-probe` (exit 0) | печать каждого тула + «Всего инструментов: 4» + чистое закрытие (DISCONNECTED) |
 | **Настоящий вызов инструмента** | `/mcp call mcp.weather.search_locations {"query":"Москва"}` | результат с координатами Москвы (55.75204, 37.61781) |
 | **Полный LLM tool-use** | `--mcp` → «найди город Москва» | LLM сам вызывает `search_locations` → ответ с координатами Москвы |
-| **Инструмент задания дня 17** | `--mcp` → «который час в Москве?» | LLM сам вызывает `mcp.time.get_time` → ответ «В Москве сейчас 12:52» (результат использован) |
+| **Инструмент задания** | `--mcp` → «который час в Москве?» | LLM сам вызывает `mcp.time.get_time` → ответ (результат использован) |
 | **Ручной вызов `get_time`** | `/mcp call mcp.time.get_time {"timezone_name":"Europe/Moscow"}` | ISO 8601 `2026-09-27T12:52:07+03:00`; `{}` → время в `UTC` |
 | REPL-флоу MCP | `--mcp` → `/mcp connect` → `/mcp tools` → `/mcp refresh` → `/mcp status` → `/mcp disconnect` | READY → каталог (4 тула) → атомарный refresh + сейв catalog.json → статус → DISCONNECTED |
 | Изоляция прав | `denied_tools` в `servers.json` → `/mcp refresh` → `/mcp tools` | запрещённый тул не попадает в discovery |
-| Недоступный сервер — деградация | `/mcp connect` при упавшем сервере | FAILED/DEGRADED, тулов нет, REPL жив (память/профили/автомат работают) |
-| Какие данные попадают в каждый слой | `/memory`, журнал `Den_log.md` | `[Память] … ← …` по каждому слою |
+| Недоступный сервер — деградация | `/mcp connect` при упавшем сервере | FAILED/DEGRADED, тулов нет, REPL жив |
+| Планировщик 24/7 | `python Kod.py --mcp --scheduler` → `/mcp jobs` → `/mcp summary` | фоновые задачи поднимаются внешним worker; сводка отдаётся без запроса к LLM |
+| Пайплайн инструментов | `/mcp pipeline <запрос>` | цепочка `search → summarize → saveToFile`, данные передаются между шагами, аудит — 3 записи `succeeded` |
+| Несколько серверов | `/mcp servers` / `/mcp tools` / `/mcp route <текст>` | инструменты квалифицированы `mcp.<server>.<tool>`, маршрутизация и объяснение выбора |
+| Какие данные попадают в слой | `/memory`, журнал `Den_log.md` | `[Память] … ← …` по каждому слою |
 | Как память влияет на ответы | `/compare` | два ответа: с `long_term` и без него |
 | Дозированная доставка | `/deliver profile,working` | слой `long_term` физически отсутствует в промте |
 | Недопустимый переход блокируется кодом | `/plan <цель>` → `/goto implementation` → `/state` | «ОТКАЗАНО», правило, состояние не изменилось, запись `allowed: false` |
@@ -876,130 +1222,175 @@ retry на HTTP 429 с задержками 2 → 4 → 8 сек, таймаут
 | **RAG: метрики и сравнение** | `./run.sh --rag-eval` / `--rag-compare` | recall/hit-rate/mrr/ndcg; таблица «стратегия × режим» + вердикт |
 | **RAG: без `--rag` — регрессия** | `./run.sh --user demo` (без флага) | блок `[rag]` отсутствует, `rag` не импортируется |
 
-Готовый сценарий живой демонстрации куратору — `dev/tests_debug/scenario/scen_1.md`
-(MCP) и `dev/tests_debug/scenario/scen_rag.md` (RAG, Ревизия 6).
+---
 
-## Тестирование и приёмка
+## Служебное пространство `dev/` (проект про проект)
 
-Всё — **без живого ключа** (`API_KEY=test-key`, `MockClient`, `FakeMCPTransport`),
-тестовые данные пишутся только в `dev/tests_debug/.tmp/` (в `.gitignore`), рабочие
-`users/` не затрагиваются. `pytest` в venv недели отсутствует, поэтому L2 идёт через
-собственный лёгкий раннер `unit_runner.py`.
+### Дерево `dev/`
 
-| Уровень | Команда | Результат |
-|---|---|---|
-| L1 | `python -m py_compile Kod.py core/*.py memory/*.py storage/*.py integrations/mcp/*.py` | exit 0 |
-| L2 | `env -u API_KEY python dev/tests_debug/unit_runner.py` | **244 OK, 0 FAIL** (18 модулей: 195 прежних + MCP + **RAG: 16 test_rag_integration + 18 test_rag_grounding + 15 test_rag_cache**) |
-| L3 | `API_KEY=test-key python dev/tests_debug/smoke.py` | SMOKE OK, exit 0 |
-| L4 | `API_KEY=test-key python dev/tests_debug/scenario.py` | SCENARIO OK, exit 0 |
-| Гейт | `API_KEY=test-key bash dev/tests_debug/check_acceptance.sh` | **33 из 33 ✅, exit 0** (25 прежних + **8 Ревизии 6**: импорт `rag`; индекс строится и переживает save/load; поиск отдаёт хит с метаданными; две стратегии чанкинга; отчёт сравнения; без `--rag` нет `[rag]`; `TaskStage` не затронут; `--rag-eval` hit-rate@5 ≥ 0.80) |
-| Интеграция | `timeout 60 python Kod.py --mcp-probe` (реальный HTTP-сервер) | READY → 4 тула (1 `time` + 3 `weather`) → DISCONNECTED, exit 0 (не гейт — живой прогон) |
-| Живой tool-use | `printf 'найди город Москва\n/exit\n' \| python Kod.py --user u --mcp` | LLM вызывает `search_locations` → ответ с координатами Москвы (не гейт — живой прогон) |
-| Живой tool-use дня 17 | `printf 'который час в Москве?\n/exit\n' \| python Kod.py --user u --mcp` | LLM вызывает `mcp.time.get_time` → ответ «В Москве сейчас 12:52» (не гейт — живой прогон) |
 
-`test_mcp.py` (21 тест) — канон `arch_den_16.md` §3.2: контракты (квалифицированное
-имя, source/provider); discovery-нормализация; реестр (add/refresh/snapshot, коллизии,
-unregister, get-ошибка); атомарность (version монотонный, «половинного» каталога не
-бывает); недоступный сервер (FAILED, тулы исключены, остальные живы); фильтр
-allowed/denied; персистентность (round-trip, битый файл → schema_version=1); **MCP не
-трогает состояние** (TaskStage не изменился, transition_log пуст); **MCP off по
-умолчанию** (без `--mcp` реестр пуст, агент = den_15); конфиг (дефолт/битый/неизвестные
-ключи).
+AI_9/dev/
+├── migr_plan.md                  # план-эталон миграции
+├── migr_plan_0.md … migr_plan_11.md  # исполняемые планы этапов (конец этапа — гейт в следующий)
+├── migr_log.md                   # журнал миграции «было → стало → проверка → статус»
+├── Проверка.md                   # чек-лист приёмки (54 критерия + три сценария дня 20)
+├── old_vers/                     # история прошлых ревизий (1…7)
+├── meta_promt/                   # метапромты (вспомогательные промты)
+├── tests_debug/
+│   ├── check_acceptance.sh       # гейт приёмки (33 проверки)
+│   ├── unit_runner.py            # L2-раннер (без pytest)
+│   ├── smoke.py                  # L3-смоук (+ MCP-прогон + tool-use)
+│   ├── scenario.py               # L4-сценарии (+ mcp_discovery, llm_tool_use, tool_denied, multiserver_flow)
+│   ├── unit/
+│   │   ├── … прежние модули (MCP/RAG off)
+│   │   ├── test_mcp.py           # контракты + реестр + gateway + call_tool + policy + tool-use
+│   │   └── test_rag_*.py         # integration / grounding / cache
+│   ├── scenario/
+│   │   ├── scen_1.md             # сценарий ручной демонстрации MCP
+│   │   └── scen_rag.md           # сценарий ручной демонстрации RAG
+│   └── .tmp/                     # единственное место прогонов (.gitignore)
+├── logs_reports/                 # stages/ + errors/ + archive/
+└── vps/                          # инфраструктурный контур VPS (units/, evidence/, скрипты)
 
-Человеческая версия приёмки — **54 критерия, 54/54 зелёных** — в
-[`dev/Проверка.md`](dev/Проверка.md): 40 прежних (без регрессии) + **строки 41–48
-Ревизии 2** (41 — HTTP-транспорт/конфиг; 42 — настоящее соединение; 43 — настоящий
-список; 44 — настоящий вызов `tools/call`; 45 — контроль вызова и аудит; 46 — полный
-LLM tool-use «найди город Москва»; 47 — инструмент ≠ переход; 48 — регрессия MCP off).
-День 17 добавляет **строки 49–54** (49 — сервер задания `time` в конфиге; 50 — реальное
-discovery `get_time`; 51 — реальный вызов `get_time`; 52 — LLM tool-use «который час в
-Москве?» (4.1+4.2); 53 — аудит и «инструмент ≠ переход»; 54 — регрессия MCP off) —
-итог **54/54**.
 
-## Что зафиксировано в процессе создания
+### `tests_debug/` — что именно протестировать (канон задания)
 
-- **Миграция `den_15` → `arch_den_16.md`** (день 16, журнал `dev/migr_log.md`,
-  план-эталон `dev/migr_plan.md` + рабочие планы `migr_plan_0..12.md`): **Ревизия 2** —
-  этапы M0–M12 по зависимостям (базовая линия → HTTP-транспорт → реальное discovery →
-  `tools/call` → `ToolExecutor`/`ToolPolicy` → LLM tool-use → промт `[tools]` → агентный
-  цикл → CLI → живой прогон → тесты → документация → финал + актуализация
-  `arch_den_16.md`); перечитывание эталона перед каждым этапом; история прошлой ревизии
-  (M0–M8: discovery по локальному stdio) сохранена в `dev/old_vers/2/`;
-- **Миграция `den_16` → `den_17`** (день 17, журнал `dev/migr_log.md`, план-эталон
-  `dev/migr_plan.md` + рабочие планы `migr_plan_0..6.md`): **Ревизия 3** — этапы M0–M6
-  (базовая линия → сервер задания `time` в конфиге → реальное discovery → реальный вызов
-  `get_time` → живой LLM tool-use 4.1+4.2 → CLI/DI → документация **без тестов**);
-  инфраструктура MCP Ревизии 2 перенесена без изменений; правится только конфиг сервера
-  задания; снимок состояния на входе Ревизии 3 — в `dev/old_vers/3/`;
-- **Карточки-знания** (журнал): pip-квирк копированного venv (установка только
-  `python -m pip`); `python` отсутствует в PATH (подпроцессы через `sys.executable`);
-  квирк event loop (сессии `mcp` SDK привязаны к задаче initialize → `MCPGatewaySync`
-  держит постоянную фоновую задачу; повторный `start()` идемпотентен);
-- **Миграция `den_20` → Ревизия 5** (день 20, журнал `dev/migr_log.md`, план-эталон
-  `dev/migr_plan.md` + рабочие планы `migr_plan_0..12.md`): **Ревизия 5** — этапы 0–12
-  (инфраструктурный контур VPS 0–3: доступ/привилегии, `time` под `systemd --user`,
-  скрипты отладки + живая база, `scheduler:8010` + `pipeline:8020`; пакет правок
-  дефектов продукта 4–12, метки D1–D7, M0/M7: порог probe + `enabled`-политика,
-  каталог в промте, мультисерверный флоу, `core/tool_routing.py` + `/mcp route`,
-  таймауты транспорта, пакет мелких исправлений, авторизация транспорта); история
-  Ревизии 4 сохранена в `dev/old_vers/5/`;
-- **API SDK 2.2.0 отличается от v1**: `FastMCP` → `MCPServer`,
-  `StdioServerParameters(command: str, args: list)`, HTTP-вход —
-  `streamable_http_client` (не `streamablehttp_client`), атрибут схемы тула —
-  `input_schema` (snake_case) — найдено интеграционным прогоном;
-- Наследие инцидентов дней 11–15 (живой ключ в тесте, `bash -x` с ключом,
-  загрязнение корня смоуком, naming-инцидент) — уроки перенесены, контур дня 16
-  без живого ключа и сети (живой прогон — отдельно, в приёмке).
+- **контракты**: `ToolDescriptor` — квалифицированное имя, source/provider;
+  `ToolCatalogSnapshot` — version/tools/created_at; `ToolExecutionState`;
+- **discovery**: `MCPToolProvider.discover()` нормализует mcp-тул →
+  `name="mcp.demo.get_time"`, `original_name="get_time"`, `source="mcp"`;
+- **HTTP-транспорт**: `make_transport` выбирает `HttpMCPTransport`/`StdioMCPTransport`
+  по конфигу; `_tool_schema` читает `input_schema` (snake_case SDK 2.2.0);
+- **реестр**: `add_provider` → `refresh()` → snapshot содержит тулы провайдера;
+  коллизия имён двух серверов разрешается префиксом; `unregister_provider` → тулы
+  покидают каталог при следующем refresh; `get()` неизвестного → понятная ошибка;
+- **атомарность**: во время refresh snapshot либо старый, либо новый (version
+  монотонный, «половинного» каталога не бывает);
+- **недоступный сервер**: transport падает → gateway → `FAILED`, тулы исключены,
+  остальные провайдеры живы, исключение не роняет процесс;
+- **фильтр прав**: `allowed_tools`/`denied_tools` конфига — запрещённый тул не
+  попадает в discovery;
+- **`tools/call`**: fake успех/`isError`; `gateway.call_tool` маршрутизирует по
+  provider и отдаёт failed-результат для не-READY сервера;
+- **`ToolPolicy`/`ToolExecutor`**: отказ по схеме/стадии; исполнение + аудит;
+  отказ по инварианту (`tool.deny.*`) → `denied` в аудите;
+- **LLM tool-use**: парсеры (нативный/fallback); агентный цикл (намерение → вызов →
+  ответ); блок `[tools]` в промте + порядок блоков;
+- **персистентность**: `save_tool_catalog` → `load_tool_catalog` round-trip;
+  битый/отсутствующий файл → пустой каталог schema_version=1;
+- **MCP не трогает состояние**: после полного цикла connect → discover → refresh
+  `TaskStage` не изменился, `transition_log` пуст;
+- **MCP off по умолчанию**: без `--mcp` реестр пуст, агент отвечает как den_15;
+- **RAG**: импорт `rag`; индекс строится и переживает save/load; поиск отдаёт хит с
+  метаданными; две стратегии чанкинга; отчёт сравнения; без `--rag` нет `[rag]`;
+  `TaskStage` не затронут; `--rag-eval` hit-rate@5 ≥ 0.80.
 
-## Файлы проекта
+Интеграционный тест (не гейт, живой прогон): `HttpMCPTransport` подключается к реальному
+серверу `weatherapi` → initialize → list_tools → 3 тула; `call_tool("search_locations",
+{"query":"Москва"})` → координаты Москвы. `HttpMCPTransport` к серверу задания
+`http://91.188.212.77:8000/mcp` → READY → list_tools → 1 тул `get_time`;
+`call_tool("get_time", {"timezone_name":"Europe/Moscow"})` → ISO 8601. Живой LLM tool-use
+(«найди город Москва», «который час в Москве?») — тоже вне гейта (приёмка). Транскрипты —
+`dev/logs_reports/stages/`.
 
-| Файл / каталог | Назначение |
+### `logs_reports/`
+
+- `migr_log.md` — журнал миграции «было → стало → проверка → статус» по этапам
+  (М0–М12 и т.д.), результаты `test_mcp.py`, RAG-тестов, сценариев и живых прогонов;
+- `errors/error_<timestamp>.md` — карточки ошибок (красный гейт этапа → карточка);
+- `stages/` (+ `rag_*` транскрипты), `archive/` — живой прогон, отчёты этапов.
+
+---
+
+## Карта артефактов
+
+### Рабочие артефакты (продукт)
+
+| Артефакт | Назначение |
 |---|---|
-| `Kod.py` | Точка входа: DI-композиция `build_agent()` (+ mcp_enabled), REPL, `/mcp`-семейство, `--mcp-probe`, токен-учёт |
-| `core/` | Ядро: `agent.py`, `llm_client.py`, `profile_router.py`, `prompt_builder.py`, `state_machine.py`, `invariants.py`, **`tools.py`** (модель инструментов), **`tool_registry.py`** (каталог), **`tool_policy.py`** (проверки вызова), **`tool_executor.py`** (исполнение + аудит) |
-| `integrations/mcp/` | **MCP-слой**: config / transport (stdio + **HTTP**) / client / gateway / provider / demo_server |
-| `memory/` | Модель памяти: `base.py`, 4 слоя, `manager.py` |
-| `storage/` | Хранилище: `store.py` (фасад + MCP-методы), `db.py` (SQLite профилей) |
-| `users/` | Рантайм-данные: профили, память задач, `integrations/mcp/{servers,catalog}.json` |
-| `run.sh` / `run.desktop` | Запускающий скрипт (+x) и ярлык (пересоздать при переносе) |
-| `Den_log.md` / `tokens.csv` | Журнал маршрутизации памяти; CSV-журнал токенов |
-| `README.md` | Текстовая часть результата — модель памяти, персонализация, инварианты, переходы, **подключение MCP** |
-| `Задание_d16.txt` / `Рекомендации_MCP_d16.txt` | Постановка куратора дня 16 + фундамент MCP-подсистемы недели (не изменяются) |
-| `Задание_d17.txt` | Постановка куратора дня 17: подключить `get_time` и вызвать из приложения (не изменяется) |
-| `arch_den_16.md` | Целевая архитектура проекта (актуализирована под день 20) |
-| `dev/Проверка.md` | Чек-лист приёмки: 48 критериев дня 16 + строки 49–54 дня 17 |
-| `dev/migr_plan.md` + `migr_plan_0..12.md` | План-эталон и рабочие планы миграции (Ревизия 5, этапы 0–12) |
-| `dev/migr_log.md` | Журнал миграции: записи этапов 0–12 + «Итог Ревизии 5» |
-| `dev/tests_debug/` | L2 (`unit_runner.py` + `unit/` — 17 модулей), L3 (`smoke.py`), L4 (`scenario.py` — 13 сценариев), гейт (`check_acceptance.sh` — 25 проверок), `scenario/scen_1.md`, `.tmp/` |
-| `dev/logs_reports/` | `stages/` (в т.ч. `m9_live_run.md` — живой прогон), `errors/`, `archive/` |
+| `Kod.py` + `core/` + `memory/` + `storage/` | агент дней 11–15 без регрессии + каталог инструментов + tool-use + RAG |
+| `core/tools.py` | внутренняя модель: ToolDescriptor / ToolCallRequest / ToolExecutionResult / ToolExecutionState / ToolProvider / ToolCatalogSnapshot |
+| `core/tool_registry.py` | ToolRegistry: каталогизация, атомарный snapshot, refresh |
+| `core/tool_policy.py` | ToolPolicy: проверки вызова (enabled/схема/стадия/инварианты/подтверждение) |
+| `core/tool_executor.py` | ToolExecutor: policy → вызов → аудит |
+| `core/tool_routing.py` / `core/tool_pipeline.py` | выбор инструмента; пайплайн из инструментов |
+| `integrations/mcp/*` | MCP-слой: config / transport (stdio + HTTP + fake) / client / gateway / provider / demo_server / scheduler_server / pipeline_server |
+| `integrations/scheduler/*` | ядро планировщика (stdlib): models / store / runner / aggregator |
+| `rag/*` | RAG-модуль: config / corpus / chunking / embedding / index / retrieval / rerank / cache / grounding / eval / compare / service |
+| `users/<id>/integrations/mcp/{servers,catalog}.json` | конфиг серверов + снимок каталога (через Store) |
+| `users/<id>/tasks/<task>/tool_audit.jsonl` | история вызовов инструментов (через Store) |
+| `run.sh` / `run.desktop` | запуск (без изменений / пересоздать при переносе) |
+| `README.md` | единый источник данных о проекте (этот файл) |
 
-## Общее с Днями 6–11 (перенесённые уроки)
+### Служебные артефакты (процесс)
 
-- API: RouterAI (OpenAI-совместимый), ключ в `.env` (переменная `API_KEY`), модель
-  `stepfun/step-3.5-flash` не менять;
-- Retry при HTTP 429: до 3 повторов, задержка 2 → 4 → 8 сек; таймаут 30 сек; сбои →
-  `None`, цикл чата не прерывается;
-- Устойчивость: `sys.stdin/stdout.reconfigure(errors="replace")`, `try: import
-  readline`, все пути через `BASE_DIR`;
-- Токен-учёт: локальная оценка `~1 токен на 4 символа` с явной оговоркой, что
-  авторитет — `usage` живого API; CSV-журнал стоимости;
-- Зависимости: `requests`, `python-dotenv`, стандартная библиотека + **`mcp`**
-  (Model Context Protocol Python SDK 2.2.0 — только для `integrations/mcp/`).
+| Артефакт | Назначение |
+|---|---|
+| `dev/Проверка.md` | чек-лист приёмки: 54 критерия + три сценария дня 20 |
+| `dev/migr_plan.md` + `migr_plan_*.md` | план-эталон и рабочие планы миграции |
+| `dev/migr_log.md` | журнал миграции + итоги ревизий |
+| `dev/tests_debug/*` | L2 (+`test_mcp.py`, `test_rag_*.py`), L3, L4 (+сценарии), гейт 33/33 |
+| `dev/logs_reports/stages/*` | транскрипты живых прогонов |
+
+---
+
+## Порядок достижения итогового состояния
+
+Порядок по зависимостям (от контрактов к CLI):
+
+1. **Базовый агент дней 11–15** — память, профили, инварианты, машина состояний, LLM-клиент.
+2. **Контракты инструментов** — `core/tools.py` (без SDK) → `core/tool_registry.py`
+   (реестр + snapshot) → `integrations/mcp/` (config → transport + fake + HTTP → client →
+   gateway → provider → demo_server).
+3. **Контроль и исполнение** — `core/tool_policy.py` + `core/tool_executor.py`.
+4. **LLM tool-use** — `core/llm_client.py` (tool-use) → `core/prompt_builder.py`
+   (блок `[tools]`) → `core/agent.py` (агентный цикл) → `storage/store.py` (каталог + аудит).
+5. **CLI** — `Kod.py` (DI + `/mcp`-семейство + `--mcp`/`--mcp-probe`).
+6. **День 20** — `integrations/scheduler/` + `scheduler_server.py` (планировщик),
+   `core/tool_pipeline.py` + `pipeline_server.py` (пайплайн), мультисерверность
+   (`config.py` + `agent.py` + `tool_routing.py`).
+7. **RAG** — `rag/` (config → corpus → chunking → embedding → index → retrieval → rerank
+   → cache → grounding → eval → compare → service) + DI-фасад в `Kod.py` + блок `[rag]`
+   в `prompt_builder.py` + `core/agent.py` (grounding).
+8. **Финал** — прогон всех проверок (L1→L2→L3→L4→гейт), приёмка, живой прогон (реальный
+   сервер + реальный LLM), запись итога в `dev/migr_log.md`, предложение коммита (коммит —
+   только по явной команде пользователя).
+
+---
+
+## Риски и откат
+
+- **Регрессия ядра дней 11–15** — снимается тем, что MCP/RAG выключены по умолчанию
+  (`mcp_enabled=False`, `--rag`); без флагов поведение = `den_15`, прежние тесты и
+  критерии проходят без сети. Откат — не включать флаги.
+- **Зависимость от внешнего MCP-сервера** — недоступный сервер → `FAILED`/`DEGRADED`,
+  тулы исключаются, REPL жив (деградация, не падение). Откат — `/mcp disconnect`.
+- **Зависимость от Ollama (RAG)** — при недоступности `127.0.0.1:11434` деградация на
+  `HashingEmbedder`; юниты и гейт от Ollama не зависят. Откат — не использовать `--rag`.
+- **Протечка модели MCP в `core`** — исключена: SDK импортируется только в
+  `integrations/mcp/`; `ToolDescriptor` — внутренняя модель. Проверяется тестами.
+- **Загрязнение рабочих данных** — тесты пишут только в `dev/tests_debug/.tmp/`,
+  `users/` не затрагивается (проверяется идемпотентным гейтом).
+- **Недетерминированность LLM** — детерминированный тестовый контур на `MockClient` +
+  `FakeMCPTransport`; живой LLM — только приёмка.
+
+---
 
 ## Известные шероховатости и заделы
 
 **Заделы по замыслу (программа следующих дней недели 4):**
 
 - **`ToolMemoryPolicy`**: сырые ответы MCP никогда не пишутся в память автоматически
-  (в Дне 16 — только нормализованные `external_actions` + аудит);
+  (только нормализованные `external_actions` + аудит);
 - **`ToolPromptPolicy` + блок `[external_context]`** (MCP resources): дозированная
-  доставка описаний тулов под токен-бюджет (в Дне 16 — базовые лимиты `max_tools`/
-  `max_schema_tokens`); сравнение токен-флоу MCP vs Skill + CLI — цель недели;
-- **полный async core**:  — async gateway за синхронным фасадом `MCPGatewaySync` (меньше регрессионного риска);
+  доставка описаний тулов под токен-бюджет (базовые лимиты `max_tools`/
+  `max_schema_tokens` реализованы); сравнение токен-флоу MCP vs Skill + CLI — цель недели;
+- **полный async core**: async gateway за синхронным фасадом `MCPGatewaySync`
+  (меньше регрессионного риска при том же контракте);
 - **параллелизм read-only тулов**; **local-провайдер** (`local.*` — только безопасные
   доменные операции, никогда `local.set_stage` / `local.write_task_state_file`);
 - **расширение policy pipeline** (риск-уровни, подтверждения, `ToolPolicy` как
-  полноценный движок) — в Дне 16 реализован минимальный набор ступеней;
+  полноценный движок) — реализован минимальный набор ступеней;
 - `PolicyEngine` в `memory/base.py` — пустой интерфейс-задел (рабочий слой
   инвариантов — отдельный модуль `core/invariants.py`);
 - `parent_id` сообщений — задел ветвления диалога; `skills[]` — декларативный
@@ -1009,81 +1400,55 @@ discovery `get_time`; 51 — реальный вызов `get_time`; 52 — LLM 
 **Расхождения spec/кода (на поведение не влияют):**
 
 - `mcp` SDK импортируется в `transport.py` и `demo_server.py` (уровень транспорта),
-  а не в `client.py`, как в плане M3: фактический API SDK 2.2.0 (`stdio_client` +
-  `ClientSession`) живёт на уровне транспорта, клиент делегирует; инвариант «SDK
-  только в `integrations/mcp/`» соблюдён;
+  а не в `client.py`: фактический API SDK 2.2.0 (`stdio_client` + `ClientSession`) живёт
+  на уровне транспорта, клиент делегирует; инвариант «SDK только в `integrations/mcp/`»
+  соблюдён;
 - `handle_mcp_command` (`/mcp servers`, `/mcp connect`) читает приватное
-  `gateway.gateway._servers` — допустимо для CLI-слоя, кандидат на публичный
-  accessor дня 17+;
-- смоуки этапов миграции (`m1_smoke.py` … `m6_smoke.py` в `dev/tests_debug/.tmp/`)
-  — рабочие артефакты этапов M1–M6, вне дерева `arch_den_16.md` §3.1; оставлены как
-  доказательства этапов (традиция den_15; решение зафиксировано в `dev/migr_log.md`).
+  `gateway.gateway._servers` — допустимо для CLI-слоя, кандидат на публичный accessor;
+- смоуки этапов миграции (`m*_smoke.py` в `dev/tests_debug/.tmp/`) — рабочие артефакты
+  этапов, вне дерева §3.1; оставлены как доказательства этапов.
 
 **Косметика:**
 
 - каталоги `dev/tests_debug/fixtures/` и `smoke/` созданы каркасом и остались пустыми;
-  в `.tmp/` накапливаются каталоги прошлых прогонов (в `.gitignore`, не удаляются
-  автоматически);
-- `dev/meta_promt/` в этой копии пуст (метапромты и журналы дебага дней 13–14
-  остались в `Nedela_3/den_13/`, `Nedela_3/den_14/`);
+  в `.tmp/` накапливаются каталоги прошлых прогонов (в `.gitignore`);
+- `dev/meta_promt/` в этой копии содержит только `МЕТА-ПРОМТ_den_N.md` и `PROMT_otch.md`;
 - изменения миграции не закоммичены (коммит — только по явной команде пользователя).
+
+---
 
 ## Результат
 
-- **Код, подключающийся к MCP и выводящий список доступных инструментов** — результат
-  задания дня 16: `--mcp-probe` (one-shot, exit 0/1) и `/mcp tools` (REPL); соединение
-  устанавливается (handshake `initialize` → `READY`), список корректно возвращается
-  (`tools/list` → нормализация → каталог) — **на реальном сервере**
-  `https://weatherapi.projecteol.ru/mcp/` (3 инструмента);
-- **Инструмент задания дня 17 подключён и вызван из приложения** (п. 4.1): сервер
-  задания `http://91.188.212.77:8000/mcp` (env `MCP_SERVER_URL`) в `DEFAULT_SERVERS`
-  (сервер `time`); `get_time(timezone_name) -> ISO 8601` в каталоге
-  (`mcp.time.get_time`); живой прогон «который час в Москве?» → LLM **сам** предлагает
-  нативный `tool_call` `get_time({"timezone_name":"Europe/Moscow"})` → реальный вызов →
-  **результат использован** в финальном ответе (п. 4.2): «В Москве сейчас 12:52»;
+- **Код, подключающийся к MCP и выводящий список доступных инструментов** — `--mcp-probe`
+  (one-shot, exit 0/1) и `/mcp tools` (REPL); соединение устанавливается (handshake
+  `initialize` → `READY`), список корректно возвращается (`tools/list` → нормализация →
+  каталог) — **на реальных серверах** `https://weatherapi.projecteol.ru/mcp/` (3 инструмента)
+  и сервере задания `http://91.188.212.77:8000/mcp` (`get_time`).
 - **Настоящий вызов инструмента и полный LLM tool-use**: `tools/call` на живом сервере
   (`search_locations({"query":"Москва"})` → координаты Москвы; `get_time({"timezone_name":
   "Europe/Moscow"})` → `2026-09-27T12:52:07+03:00`); в REPL сообщение «найди город
-  Москва» / «который час в Москве?» → LLM сам вызывает инструмент → ответ с результатом;
+  Москва» / «который час в Москве?» → LLM сам вызывает инструмент → ответ с результатом.
+- **Планировщик, пайплайн, мультисерверность**: фоновый worker 24/7 (не LLM); цепочка
+  `search → summarize → saveToFile` с передачей данных; выбор и маршрутизация инструмента
+  по `mcp.<server>.<tool>`, длинный флоу в одном запросе.
+- **RAG-модуль**: индексация корпуса (более 100 чанков / 9 документов), гибридный поиск
+  (BM25⊕dense → RRF → реранк → MMR), блок `[rag]` со ссылками `[doc_id#chunk_id]`,
+  grounding (`ok|partial|hallucination`) и одна авто-перегенерация в `strict`.
 - **Не скрипт, а вертикальный срез подсистемы**: `MCPGateway` (адаптер, не контролёр)
   → `MCPToolProvider` (нормализация во внутреннюю `ToolDescriptor`) → `ToolRegistry`
   (каталог + атомарный snapshot + персистентность через `Store`) → `ToolExecutor`
-  (policy + аудит) → LLM tool-use — фундамент всей MCP-работы недели 4;
+  (policy + аудит) → LLM tool-use.
 - **Пять «кубиков» дней 11–15 без регрессии**: память, профили, инварианты, строгая
-  машина состояний, LLM-клиент — контракты не тронуты; MCP выключен по умолчанию;
-- **Инструмент ≠ переход**: `TaskStage` (8 стадий) не меняется от вызовов MCP;
-  MCP-стадий нет; успех вызова не создаёт запись в `transition_log`;
+  машина состояний, LLM-клиент — контракты не тронуты; MCP и RAG выключены по умолчанию.
+- **Инструмент ≠ переход**: `TaskStage` (8 стадий) не меняется от вызовов MCP/RAG;
+  успех вызова не создаёт запись в `transition_log`.
 - **Изоляция прав через тулинг**: `allowed_tools`/`denied_tools` в конфиге сервера;
-  модель MCP не протекает в `core`; `MCPGateway` не знает о стадиях/профилях/памяти;
+  модель MCP не протекает в `core`; `MCPGateway` не знает о стадиях/профилях/памяти.
 - **Деградация, не падение**: недоступный сервер → FAILED/DEGRADED, REPL жив;
-- **Проверяемость**: L2 122 / L3 7 / L4 14 без живого ключа и сети, гейт 21/21,
-  приёмка 54/54; живой прогон (реальный HTTP-сервер + реальный LLM) — 4 тула (1 `time`
-  + 3 `weather`), вызов `search_locations` (координаты Москвы) и `get_time`
-  («который час в Москве?» → «В Москве сейчас 12:52»);
-- **Заделы с зарезервированными местами**: `ToolMemoryPolicy` (сырое — никогда в память),
-  `ToolPromptPolicy`/resources, параллелизм read-only тулов, local-провайдер, полный
-  async core, сравнение токен-флоу MCP vs Skill + CLI.
-
-## Ручная проверка
-
-Пошаговый чек-лист приёмки с отметками — в файле
-[`dev/Проверка.md`](dev/Проверка.md): 40 критериев с конкретной командой проверки по
-каждому (комплектность и сборка, четыре слоя памяти, иерархия хранилища, явная
-маршрутизация, дозированная доставка, идентификация и интервью, задачи и переходы,
-промт блоками, LLM за интерфейсом, state machine, resume, неизменяемые сообщения,
-демонстрации, текстовое описание, уроки Дня 10, тесты без ключа, задел инвариантов,
-расположение чек-листа,
-+ строки 20–22: несколько профилей, миграция и обратная совместимость, роутер,
-+ строки 23–25: формализованное состояние, пауза/продолжение, персистентность,
-+ строки 26–30: инварианты — отдельное хранение, учёт в промте, отказ, конфликт,
-изменение с подтверждением,
-+ строки 31–35: контролируемые переходы — явный набор состояний, явная карта,
-блокировка кодом, реакция ассистента, корректность продолжения после паузы,
-+ **строки 36–40: подключение MCP** — SDK/демо-сервер, соединение устанавливается,
-список корректно возвращается, список выводится кодом, регрессия MCP off,
-+ **строки 41–48: реальное подключение и полный LLM tool-use** (Ревизия 2),
-+ **строки 49–54: инструмент задания дня 17** — сервер `time` в конфиге, реальное
-discovery `get_time`, реальный вызов `get_time`, LLM tool-use «который час в Москве?»
-(4.1+4.2), аудит и «инструмент ≠ переход», регрессия MCP off).
-Машиночитаемый дубль — `dev/tests_debug/check_acceptance.sh` (21 проверка, идемпотентен).
-Сценарий живой демонстрации куратору — `dev/tests_debug/scenario/scen_1.md`.
+  недоступная Ollama → `HashingEmbedder`.
+- **Проверяемость**: L1 OK / L2 244 OK / L3 SMOKE OK / L4 SCENARIO OK, гейт **33/33**,
+  приёмка **54/54** — без живого ключа и сети; живой прогон (реальный HTTP-сервер +
+  реальный LLM) — отдельно.
+- **Заделы с зарезервированными местами**: `ToolMemoryPolicy`, `ToolPromptPolicy`/resources,
+  параллелизм read-only тулов, local-провider, полный async core, сравнение токен-флоу
+  MCP vs Skill + CLI.
