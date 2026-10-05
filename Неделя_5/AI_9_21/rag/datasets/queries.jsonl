@@ -1,0 +1,24 @@
+{"id": "q01", "query": "как запретить агенту менять технологический стек проекта", "relevant": ["core/invariants.py::InvariantChecker"], "must_contain": ["инвариант", "severity"]}
+{"id": "q02", "query": "чем набор обязательных правил отличается от истории диалога", "relevant": ["core/invariants.py::ConstraintSet"], "must_contain": ["ConstraintSet", "инвариант"]}
+{"id": "q03", "query": "кто проверяет предлагаемое действие до его выполнения", "relevant": ["core/invariants.py::RuleBasedChecker"], "must_contain": ["ProposedAction", "check"]}
+{"id": "q04", "query": "можно ли обычной фразой в чате отменить неизменяемое правило", "relevant": ["core/invariants.py::update_invariant"], "must_contain": ["authorized", "PermissionError"]}
+{"id": "q05", "query": "в каком порядке блоки собираются в промт для модели", "relevant": ["core/prompt_builder.py::BLOCK_ORDER"], "must_contain": ["BLOCK_ORDER", "role"]}
+{"id": "q06", "query": "как ограничить число инструментов и размер их схем в подсказке", "relevant": ["core/prompt_builder.py::render_tools"], "must_contain": ["max_tools", "max_schema_tokens"]}
+{"id": "q07", "query": "какие слои памяти можно не доставлять в контекст", "relevant": ["core/prompt_builder.py::DELIVERABLE"], "must_contain": ["deliver", "DELIVERABLE"]}
+{"id": "q08", "query": "единый интерфейс для всех видов памяти агента", "relevant": ["memory/base.py::MemoryLayer"], "must_contain": ["MemoryLayer", "read"]}
+{"id": "q09", "query": "какие метаданные сопровождают объект памяти", "relevant": ["memory/base.py::MemoryItem"], "must_contain": ["scope", "visibility"]}
+{"id": "q10", "query": "как указать чья память и в рамках какой задачи читается", "relevant": ["memory/base.py::MemoryContext"], "must_contain": ["user_id", "session_id"]}
+{"id": "q11", "query": "единственная точка записи в память агента", "relevant": ["memory/manager.py::MemoryManager"], "must_contain": ["remember", "recall"]}
+{"id": "q12", "query": "в каком порядке слои памяти попадают в промт", "relevant": ["memory/manager.py::LAYER_ORDER"], "must_contain": ["LAYER_ORDER", "profile"]}
+{"id": "q13", "query": "как описать подключение к внешнему серверу инструментов", "relevant": ["integrations/mcp/config.py::MCPServerConfig"], "must_contain": ["MCPServerConfig", "transport"]}
+{"id": "q14", "query": "что произойдёт если файл настроек серверов повреждён", "relevant": ["integrations/mcp/config.py::load_servers_config"], "must_contain": ["DEFAULT_SERVERS", "json"]}
+{"id": "q15", "query": "какие серверы инструментов включены по умолчанию", "relevant": ["integrations/mcp/config.py::DEFAULT_SERVERS"], "must_contain": ["time", "weather"]}
+{"id": "q16", "query": "как хранится токен доступа к серверу инструментов", "relevant": ["integrations/mcp/config.py::MCPServerConfig"], "must_contain": ["token_env", "Bearer"]}
+{"id": "q17", "query": "как проверить работу инструментов без ключа и сети", "relevant": ["dev/Проверка.md::Сценарий 1"], "must_contain": ["demo_server", "tools/list"]}
+{"id": "q18", "query": "размерность вектора у модели эмбеддингов", "relevant": ["ND/models/bge-m3_params.md::Характеристики"], "must_contain": ["1024", "dim"]}
+{"id": "q19", "query": "какой адрес у локального сервиса эмбеддингов", "relevant": ["ND/models/bge-m3_params.md::Эндпоинты API"], "must_contain": ["11434", "api/embed"]}
+{"id": "q20", "query": "чем модель для поиска по смыслу отличается от чат-модели", "relevant": ["ND/models/bge-m3_params.md::Отличия от чат-моделей"], "must_contain": ["вектор", "temperature"]}
+{"id": "q21", "query": "насколько большое контекстное окно у DeepSeek V4 Pro", "relevant": ["ND/models/DeepSee-V4-Pro-0813.md::Характеристики"], "must_contain": ["1M", "контекст"]}
+{"id": "q22", "query": "какая температура рекомендуется для модели Lunaris", "relevant": ["ND/models/Llama-3-8B-Lunaris.md::Что умеет"], "must_contain": ["1.4", "min_p"]}
+{"id": "q23", "query": "сколько стоит миллион входящих токенов у DeepSeek V4 Pro", "relevant": ["ND/models/DeepSee-V4-Pro-0813.md::Цены"], "must_contain": ["91", "токен"]}
+{"id": "q24", "query": "как отключить проверку правил для конкретного действия", "relevant": ["core/invariants.py::toggle_invariant"], "must_contain": ["active", "toggle"]}
