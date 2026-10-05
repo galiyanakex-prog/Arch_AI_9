@@ -1,0 +1,1 @@
+{"execution_id": "exec-0001", "tool": "mcp.weather.search_locations", "provider": "", "status": "succeeded", "phase": "invoked", "arguments_hash": "9d47a52fdfe6b749", "call_id": "chatcmpl-tool-b97472483905fcfe", "duration_ms": 424, "error": "", "at": "2026-09-25 02:53:00"}

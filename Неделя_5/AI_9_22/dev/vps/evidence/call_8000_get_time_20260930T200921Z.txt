@@ -1,0 +1,6 @@
+# call :8000 get_time {"timezone_name":"Europe/Moscow"}  2026-09-30T20:09:21Z
+mcp-session-id: 7850e1b074e445299162e69b4e64c64d
+-- tools/call --
+event: message
+data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"2026-09-30T23:09:21.839043+03:00","type":"text"}],"isError":false,"structuredContent":{"result":"2026-09-30T23:09:21.839043+03:00"}}}
+

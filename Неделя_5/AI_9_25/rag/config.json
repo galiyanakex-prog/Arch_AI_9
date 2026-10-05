@@ -1,0 +1,74 @@
+{
+  "_comment": "Конфигурация RAG-модуля AI_9. Секреты здесь запрещены; embedding.url — только 127.0.0.1/localhost.",
+  "corpus": {
+    "list_file": "rag/datasets/corpus.list",
+    "max_docs": 2000,
+    "max_chunks": 50000,
+    "deny": [
+      ".env",
+      ".ssh",
+      "users",
+      ".venv",
+      "__pycache__",
+      "rag/index",
+      "*.db"
+    ]
+  },
+  "chunking": {
+    "strategy": "structural",
+    "size_tokens": 400,
+    "overlap_ratio": 0.15,
+    "parent_max_tokens": 1200,
+    "keep_code_whole": true,
+    "fixed_size_tokens": 300,
+    "fixed_overlap_tokens": 60
+  },
+  "embedding": {
+    "provider": "ollama",
+    "model": "bge-m3",
+    "dim": 1024,
+    "url": "http://127.0.0.1:11434",
+    "batch_size": 8,
+    "timeout_seconds": 60,
+    "retries": 2,
+    "keep_alive": "10m",
+    "fallback_provider": "hashing",
+    "hashing_dim": 256
+  },
+  "retrieval": {
+    "mode": "hybrid",
+    "candidate_k": 50,
+    "final_k": 5,
+    "rrf_k": 60,
+    "rrf_weight_bm25": 0.1,
+    "rrf_weight_dense": 1.0,
+    "mmr_lambda": 0.7,
+    "max_chunks_per_doc": 2,
+    "multi_query": false,
+    "bm25": {
+      "k1": 1.2,
+      "b": 0.75
+    }
+  },
+  "rerank": {
+    "provider": "lexical",
+    "enabled": true,
+    "candidates": 20
+  },
+  "cache": {
+    "enabled": true,
+    "max_entries": 256,
+    "ttl_seconds": 900
+  },
+  "grounding": {
+    "mode": "strict",
+    "coverage_min": 0.45,
+    "numbers_strict": true,
+    "max_regenerations": 1
+  },
+  "budget": {
+    "max_rag_tokens": 1400
+  },
+  "index_dir": "rag/index",
+  "enabled": false
+}

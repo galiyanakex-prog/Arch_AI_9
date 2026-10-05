@@ -1,0 +1,34 @@
+[MCP] Подключение к серверам: time, weather, demo
+[MCP] «time»: подключён (READY)
+[MCP] «weather»: подключён (READY)
+[MCP] Соединение установлено (READY). Список доступных инструментов:
+
+  mcp.time.get_time
+    description: 
+Получает текущее время в указанном часовом поясе.
+
+Args:
+    timezone_name: Часовой пояс в формате IANA,
+                   например Europe/Moscow, Europe/London, Asia/Tokyo или UTC.
+
+Returns:
+    Текущее время в указанном часовом поясе в формате ISO 8601.
+
+    input_schema: {"properties": {"timezone_name": {"default": "UTC", "title": "Timezone Name", "type": "string"}}, "type": "object", "title": "get_timeArguments"}
+
+  mcp.weather.search_locations
+    description: Search ProjectEOL's local city index and return coordinates for a forecast request.
+    input_schema: {"type": "object", "properties": {"query": {"type": "string", "description": "City or locality name."}, "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 8}}, "required": ["query"], "additionalProperties": false}
+
+  mcp.weather.get_forecast_metadata
+    description: Return the published forecast period, coverage, provenance, and available parameter codes.
+    input_schema: {"type": "object", "properties": {}, "additionalProperties": false}
+
+  mcp.weather.get_weather_forecast
+    description: Return upcoming forecast values at coordinates. Every value includes its unit and exact UTC valid time.
+    input_schema: {"type": "object", "properties": {"latitude": {"type": "number", "minimum": -90, "maximum": 90}, "longitude": {"type": "number", "minimum": -180, "maximum": 180}, "start": {"type": "string", "description": "Optional ISO 8601 time with Z or UTC offset."}, "hours": {"type": "integer", "default": 24, "minimum": 1, "maximum": 168}, "parameters": {"type": "array", "items": {"type": "string"}, "description": "Optional metadata parameter codes."}, "interpolation": {"type": "string", "enum": ["nearest", "linear"], "default": "nearest"}}, "required": ["latitude", "longitude"], "additionalProperties": false}
+
+[MCP] Всего инструментов: 4
+[MCP] «time»: отключён
+[MCP] «weather»: отключён
+[MCP] Соединение закрыто (DISCONNECTED).

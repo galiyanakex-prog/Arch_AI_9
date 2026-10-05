@@ -1,0 +1,15 @@
+# ssh_config.snippet — блок для ~/.ssh/config (вне репозитория).
+# Вставить в конец ~/.ssh/config, затем: chmod 600 ~/.ssh/config
+# Ключ лежит в репозитории AI_9/.ssh/ (в .gitignore); путь — абсолютный.
+
+Host mcp-vps
+    HostName 91.188.212.77
+    User t
+    IdentityFile ~/.ssh/id_ed25519_AI_9_vps
+    IdentitiesOnly yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    ExitOnForwardFailure yes
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m

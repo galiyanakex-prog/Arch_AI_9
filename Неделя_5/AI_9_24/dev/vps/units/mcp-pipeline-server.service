@@ -1,0 +1,19 @@
+# mcp-pipeline-server.service — пользовательский юнит MCP-сервера пайплайна (:8020).
+# Этап 3 (И3): третий сервер задания — «несколько MCP-серверов» (Задание_d20.txt).
+# Деплой — dev/vps/deploy_services.sh. Общий venv VPS (/home/t/doc/mcp/ai9).
+
+[Unit]
+Description=MCP pipeline server (AI_9, :8020)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/t/doc/AI_9
+ExecStart=/home/t/doc/mcp/ai9/bin/python -m integrations.mcp.pipeline_server
+Restart=always
+RestartSec=3
+Environment=PIPELINE_PORT=8020
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

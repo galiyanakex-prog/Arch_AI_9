@@ -1,0 +1,26 @@
+# Скрыть файлы с ключами
+.env
+ENV
+
+# Python
+__pycache__/
+*.pyc
+
+
+# Временные файлы
+check_models.py
+.kodacli
+.tmp
+
+# Видео
+.mp4
+
+
+# SSH
+.ssh
+
+
+
+# RAG: артефакты индекса (восстанавливаются командой --rag-ingest)
+rag/index/
+rag/.tmp/

@@ -1,0 +1,22 @@
+{
+  "summaries": [
+    {
+      "window": 0,
+      "metrics": {
+        "observations": 2,
+        "sources": [
+          "weather"
+        ],
+        "temp": {
+          "count": 2,
+          "min": 20.0,
+          "max": 24.0,
+          "avg": 22.0,
+          "last": 24.0
+        }
+      },
+      "text": "Наблюдений в окне: 2\nИсточники: weather\ntemp: count=2, min=20.0, max=24.0, avg=22.0, last=24.0\nПоследнее наблюдение: 2026-09-27T19:55:32+00:00 (weather)",
+      "created_at": "2026-09-27T19:55:32+00:00"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "content": "который час в Москве?",
+      "source": "user",
+      "scope": "session",
+      "owner": "w17",
+      "visibility": "private",
+      "source_message_id": "M1",
+      "id": "M1",
+      "parent_id": null,
+      "role": "user",
+      "created_at": "2026-09-27 12:38:07"
+    },
+    {
+      "content": "Сейчас в Москве 12:38.",
+      "source": "model",
+      "scope": "session",
+      "owner": "w17",
+      "visibility": "private",
+      "source_message_id": "M1a",
+      "id": "M2",
+      "parent_id": "M1",
+      "role": "assistant",
+      "created_at": "2026-09-27 12:38:11"
+    }
+  ]
+}

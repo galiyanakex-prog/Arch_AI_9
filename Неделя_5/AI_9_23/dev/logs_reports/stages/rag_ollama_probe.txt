@@ -1,0 +1,56 @@
+# Транскрипт живого probe Ollama (этап 1, О1)
+
+Дата: 2026-10-04
+Хост: m45 (Linux, x86_64)
+Ollama: 0.35.1 (системная установка, `/usr/local/bin/ollama`)
+Сервис: `ollama.service` (systemd, `User=ollama`), `OLLAMA_HOST=127.0.0.1:11434`
+
+## 1. Версия сервиса
+
+```
+$ curl -s http://127.0.0.1:11434/api/version
+{"version":"0.35.1"}
+```
+
+## 2. Состояние сервиса и привязка к localhost
+
+```
+$ systemctl is-active ollama
+active
+
+$ ss -ltnp | grep 11434
+LISTEN 0  4096  127.0.0.1:11434  0.0.0.0:*
+```
+
+Слушает **только** `127.0.0.1` — наружу сервис не торчит.
+
+## 3. Модель
+
+```
+$ ollama list
+NAME             ID              SIZE      MODIFIED
+bge-m3:latest    790764642607    1.2 GB    23 seconds ago
+```
+
+## 4. Живой probe `/api/embed`
+
+```
+$ .venv/bin/python dev/tests_debug/.tmp/probe_embed.py
+векторов: 2 | dim = 1024 | первые 3: [-0.0067, 0.0396, -0.0328]
+OK: /api/embed вернул 2 вектора длиной 1024
+```
+
+## 5. Замечание по сети (диагностика)
+
+Первый `ollama pull bge-m3` упал с `TLS handshake timeout` после загрузки 1.2 ГБ.
+Причина: `registry.ollama.ai` резолвится и в IPv6 (`2a06:98c1:...`), но глобального
+IPv6-маршрута в системе нет (только ULA `fc42:...`), а канал медленный (~103 КБ/с).
+Повторный `ollama pull` докачал из кэша и завершился `success` — модель цела
+(`verifying sha256 digest` → `writing manifest` → `success`).
+
+Проверка IPv4/IPv6:
+
+```
+$ curl -4 -sI https://registry.ollama.ai/v2/   → HTTP/2 404 (сервер отвечает)
+$ curl -6 -sI https://registry.ollama.ai/v2/   → (пусто, IPv6 не работает)
+```

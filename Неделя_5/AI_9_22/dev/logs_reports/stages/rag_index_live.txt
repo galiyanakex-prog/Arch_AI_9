@@ -1,0 +1,15 @@
+Документов в корпусе: 9
+Эмбеддер: ollama:bge-m3  dim=1024
+
+[1] Первичная индексация: added=9 updated=0 skipped=0 chunks=105 embed_calls=105 seconds=100.701
+    stats: {'n_docs': 9, 'n_chunks': 105, 'dim': 1024, 'model_id': 'ollama:bge-m3', 'size_bytes': 2138923}
+
+[2] Повторная индексация (без изменений): added=0 updated=0 skipped=9 embed_calls=0
+
+[3] Загрузка с диска: n_chunks=105 dim=1024
+    BM25 'инварианты проекта': 3 хитов
+      core/invariants.py  score=4.964
+      memory/base.py  score=3.208
+      core/prompt_builder.py  score=3.150
+
+OK: индекс строится, переживает перезапуск, повторный ingest не эмбеддит

@@ -1,0 +1,14 @@
+{
+  "id": "w17",
+  "profile_id": "default",
+  "name": "/mcp status",
+  "style": {
+    "answers": "/mcp refresh"
+  },
+  "constraints": {
+    "answers": "/mcp status"
+  },
+  "context": {
+    "answers": "/mcp tools"
+  }
+}
