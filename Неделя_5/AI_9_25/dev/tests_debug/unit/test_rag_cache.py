@@ -108,7 +108,7 @@ class CountingRetriever:
         self.hits = hits
         self.calls = 0
 
-    def search(self, query, k=5, mode=None, filters=None):
+    def search(self, query, k=5, mode=None, filters=None, threshold=None):
         self.calls += 1
         return list(self.hits)
 
@@ -188,7 +188,7 @@ def test_search_multi_fuses_variants():
     class PerQueryRetriever:
         def __init__(self):
             self.calls = 0
-        def search(self, query, k=5, mode=None, filters=None):
+        def search(self, query, k=5, mode=None, filters=None, threshold=None):
             self.calls += 1
             if "один" in query:
                 return [hit("d1#1", "d1")]

@@ -84,9 +84,11 @@ class RagService:
 
     # ---------- поиск ----------
     def search(self, query: str, k: int = None, mode: str = None,
-               filters=None) -> list:
+               filters=None, threshold: float = None) -> list:
         """Топ-k чанков по запросу. Пустой индекс/ошибка → [] (деградация).
 
+        `threshold` — порог отсечения нерелевантного (часть 2 Задание.txt);
+        None → из конфига (cfg.retrieval.threshold).
         Кэш (этап 10): ключ включает model_id, версию индекса, нормализованный
         запрос, параметры и фильтры; запись невалидна при истечении TTL или
         изменении mtime затронутых документов. Промах → реальный поиск.
@@ -94,8 +96,11 @@ class RagService:
         if not query or not query.strip():
             return []
         k = k or self.cfg.retrieval.final_k
+        if threshold is None:
+            threshold = self.cfg.retrieval.threshold
         index = self._ensure_index()
-        params = {"k": k, "mode": mode or self.cfg.retrieval.mode}
+        params = {"k": k, "mode": mode or self.cfg.retrieval.mode,
+                  "threshold": threshold}
         key = make_key(index.meta.get("model_id", ""), index.version(), query,
                        params, filters)
         cached = self._cache.get(key, index.mtimes())
@@ -106,7 +111,8 @@ class RagService:
         started = time.time()
         try:
             retriever = self._ensure_retriever()
-            hits = retriever.search(query, k=k, mode=mode, filters=filters)
+            hits = retriever.search(query, k=k, mode=mode, filters=filters,
+                                    threshold=threshold)
         except Exception as error:            # RAG не роняет ответ агента
             self.log(f"[RAG] поиск не удался ({type(error).__name__}: {error}) — блок опущен")
             return []
@@ -195,6 +201,67 @@ class RagService:
             result.append(dataclasses.replace(hit, scores=scores))
         return result[:k]
 
+    # ---------- ответ RAG (часть 1, этап 7; часть 3, этап 9) ----------
+    def answer(self, question: str, use_rag: bool = True, k: int = None,
+               mode: str = None, threshold: float = None, llm=None,
+               grounding: str = None) -> "Answer":
+        """Функция части 1: вопрос → поиск → объединение → LLM → Answer.
+
+        `llm` — callable(messages) -> str (DI из агента; rag/ НЕ импортирует core/).
+        `threshold` — порог отсечения (часть 2). use_rag=False — тот же путь без
+        блока [rag] (сравнение режимов). Ошибки поиска/LLM не роняют вызов.
+
+        Часть 3: ответ несёт обязательные `sources`/`quotes`; при слабом контексте
+        (нет хитов или всё ниже порога) — режим «не знаю» (`verdict=insufficient`)
+        БЕЗ вызова LLM. `grounding` — переопределение режима (off|warn|strict).
+        """
+        from rag.sources import build_sources
+        from rag.types import Answer
+        started = time.time()
+        hits = self.search(question, k=k, mode=mode, threshold=threshold) if use_rag else []
+        if use_rag and not hits:
+            # Часть 3: релевантность ниже порога → честное «не знаю», без LLM.
+            return Answer(text=self.cfg.unknown.message, used_rag=False, hits=(),
+                          sources=(), quotes=(), verdict="insufficient",
+                          latency_ms=round((time.time() - started) * 1000, 1))
+        prompt = question
+        if hits:
+            block = self.context_block(hits=hits, k=k)
+            if block:
+                prompt = f"{question}\n\n{block}"
+        text = _llm_complete(prompt, llm)
+        sources = tuple(build_sources(hits)) if hits else ()
+        quotes = tuple(_build_quotes(text, hits)) if hits else ()
+        report = self.ground(text, list(hits), mode=grounding) if hits else None
+        verdict = report.verdict if report else "unchecked"
+        # Часть 3 (§9.5): strict — одна авто-перегенерация при hallucination.
+        if report is not None and llm is not None and verdict == "hallucination":
+            verdict, text, quotes = self._regenerate(prompt, hits, text, report, llm,
+                                                     grounding)
+        return Answer(text=text, used_rag=bool(hits), hits=tuple(hits),
+                      sources=sources, quotes=quotes, verdict=verdict,
+                      latency_ms=round((time.time() - started) * 1000, 1))
+
+    def _regenerate(self, prompt: str, hits: list, text: str, report, llm,
+                    grounding: str = None):
+        """Одна авто-перегенерация с фидбэк-промптом при hallucination (strict).
+
+        Возвращает (verdict, text, quotes). Если после перегенерации вердикт не
+        улучшился — оставляем явную пометку (`report.regenerated`).
+        """
+        from rag.grounding import feedback_prompt
+        fb = feedback_prompt(report, text, len(hits))
+        retry_prompt = f"{prompt}\n\n{fb}"
+        new_text = _llm_complete(retry_prompt, llm)
+        if not new_text:
+            return "hallucination", text, tuple(_build_quotes(text, hits))
+        new_report = self.ground(new_text, hits, mode=grounding)
+        new_verdict = new_report.verdict
+        # Если стало хуже или не лучше — оставляем пометку, но показываем новый текст.
+        if new_verdict == "hallucination":
+            return "hallucination", new_text, tuple(_build_quotes(new_text, hits))
+        return new_verdict, new_text, tuple(_build_quotes(new_text, hits))
+
     # ---------- блок промпта ----------
     def context_block(self, query: str = "", k: int = None, budget: int = None,
                       hits: list = None, mode: str = None) -> str:
@@ -277,6 +344,34 @@ class RagService:
         from rag.grounding import render_report
         return render_report(report)
 
+    # ---------- источники/цитаты для пути ответа агента (часть 3, этап 10) ----------
+    def sources_for(self, hits: list) -> list:
+        """Список Source по найденным чанкам (для ответа агента)."""
+        from rag.sources import build_sources
+        return build_sources(hits or [])
+
+    def quotes_for(self, answer_text: str, hits: list) -> list:
+        """Список Quote (дословные фрагменты чанков) для ответа агента."""
+        from rag.citations import build_quotes
+        return build_quotes(answer_text or "", hits or [])
+
+    def verdict_for(self, answer_text: str, hits: list, mode: str = None) -> str:
+        """Вердикт опоры ответа на источники (ok|partial|hallucination|unchecked)."""
+        if not hits:
+            return "unchecked"
+        report = self.ground(answer_text, hits=hits, mode=mode)
+        return report.verdict if report else "unchecked"
+
+    def render_sources(self, sources: list) -> str:
+        """Человекочитаемый список источников (для вывода агента)."""
+        from rag.sources import render_sources
+        return render_sources(sources)
+
+    def render_quotes(self, quotes: list) -> str:
+        """Человекочитаемый список цитат (для вывода агента)."""
+        from rag.citations import render_quotes
+        return render_quotes(quotes)
+
 
 # ---------------------------------------------------------------------------
 # Форматирование блока [rag] живёт в rag/ (граница: rag/ не импортирует core/).
@@ -351,3 +446,25 @@ def _ollama_ready(url: str) -> bool:
         return True
     except (urllib.error.URLError, OSError, ValueError):
         return False
+
+
+def _llm_complete(prompt: str, llm=None) -> str:
+    """Вызвать LLM (DI). `llm` — callable(messages)->str; без LLM — заглушка.
+
+    rag/ не импортирует core/: клиент приходит параметром из Kod.py/Agent. Если
+    LLM не передан (тесты, офлайн) — возвращаем детерминированную строку, чтобы
+    функция answer() не падала без сети.
+    """
+    if llm is None:
+        return "(LLM недоступен: ответ не сгенерирован)"
+    messages = [{"role": "user", "content": prompt}]
+    try:
+        return llm(messages) or ""
+    except Exception:
+        return "(ошибка вызова LLM)"
+
+
+def _build_quotes(answer_text: str, hits: list) -> list:
+    """Собрать цитаты (часть 3). Отдельная обёртка — ленивый импорт citations."""
+    from rag.citations import build_quotes
+    return build_quotes(answer_text, hits)

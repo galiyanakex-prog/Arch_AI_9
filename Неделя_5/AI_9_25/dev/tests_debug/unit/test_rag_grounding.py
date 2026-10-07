@@ -169,7 +169,7 @@ class GroundedFakeRag:
         self.cfg = dataclasses.replace(
             base, grounding=dataclasses.replace(base.grounding, mode=mode))
 
-    def search(self, query, k=None, mode=None, filters=None):
+    def search(self, query, k=None, mode=None, filters=None, threshold=None):
         self.search_calls += 1
         return self.hits
 

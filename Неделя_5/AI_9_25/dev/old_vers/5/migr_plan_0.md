@@ -1,140 +1,140 @@
-# migr_plan_0.md — рабочий план этапа M0 (Базовая линия Ревизии 4 и инвентаризация)
+# migr_plan_0.md — Этап 0. Доступ и привилегии (И1 + И2а)
 
-> **Роль документа.** Рабочий план-алгоритм **одного этапа** миграции `den_18`
-> под требования Дня 18. Подчинён плану-эталону `dev/migr_plan.md` (Ревизия 4,
-> §4 «Этап M0»); не расширяет его объём. Один этап = один рабочий план = один
-> автоматический гейт. Результат выполнения этапа фиксируется в `dev/migr_log.md`.
-> Перед созданием этого файла `migr_plan.md` перечитан (обязательное правило §1.1).
+> Рабочий план-алгоритм **одного этапа** на основе `dev/migr_plan.md` (Ревизия 5).
+> Контур: **И (инфраструктура VPS)**. Метки цели: **И1** (SSH-доступ),
+> **И2а** (привилегии без пароля + открытые порты).
+> Порядок выполнения: **пошагово с оператором** — агент даёт команду, оператор
+> выполняет и отчитывается, затем следующая команда.
 
----
+## Цель этапа
+Агент управляет VPS `91.188.212.77` (`t`) по ключу **без пароля**, выполняет
+ограниченный набор root-операций через узкий sudoers-белый список, публичные
+порты MCP открыты. Это фундамент: без него все дальнейшие гейты были бы
+«мёртвыми» проверками.
 
-## 0. Итог этапа (кратко)
+## Предусловия (уже выполнено)
+- Ключи созданы: `AI_9/.ssh/id_ed25519_AI_9_vps{,.pub}` (в `.gitignore`).
+- `~/.ssh/authorized_keys` на VPS исправлен (был каталогом), права `700/600`.
+- `ssh -i .ssh/id_ed25519_AI_9_vps t@91.188.212.77` → **работает** (проверено).
+- Порт 22 открыт; `sudo` требует пароль; `docker` нет; `mcp-time-server` — `inactive`.
 
-**Цель M0** — зафиксировать фактическое состояние (`den_18` = структурная копия
-`den_17`, вся MCP-инфраструктура Ревизий 2–3 готова), перечислить расхождения до
-требования дня 18, изучить образец `doc/mcp/mcp-time-server`, подготовить служебные
-документы под Ревизию 4 (снимок `old_vers/4/`, очистка `migr_log.md`).
-
-**Продукт M0** — отчёт-сверка в `migr_log.md` + зелёный baseline. Кода продукта
-этап **не меняет** (кроме восстановления окружения — см. шаг 7).
-
----
-
-## 1. Вход и предусловия
-
-- `den_18` уже содержит перенесённую инфраструктуру Ревизий 2–3 (не переписывается).
-- План-эталон `dev/migr_plan.md` (Ревизия 4) — источник истины по этапам.
-- Первоисточник `Задание_d18.txt` — прочитан целиком (3 задания + Итоговое задание).
-- Рабочий каталог: `/home/t/doc/AI_9/Nedela_4/den_18`.
+## Границы этапа
+Не запускаем и не правим серверные сервисы (это этап 1), не создаём скрипты
+(этап 2), не трогаем код `den_20`. Root-операции выполняет **оператор**; агент
+не вводит и не хранит пароль sudo.
 
 ---
 
-## 2. Шаги этапа (алгоритм)
+## Шаги
 
-### Шаг 1. Снимок состояния на входе Ревизии 4 → `dev/old_vers/4/`
-Скопировать текущие документы миграции и ключевые документы проекта, чтобы история
-прошлых ревизий не терялась:
-- `migr_plan.md`, `migr_plan_0.md`…`migr_plan_6.md`, `migr_log.md`;
-- `Проверка.md`, `Проверка_2.md`;
-- `../README.md`, `../arch.md`.
-
-Команда (идемпотентна, копирование только):
+### ШАГ 0.1 — SSH-алиас `mcp-vps` (локальная машина)
+Файл `~/.ssh/config` вне репозитория; добавляем блок, чтобы не помнить путь к ключу.
 ```bash
-cd /home/t/doc/AI_9/Nedela_4/den_18/dev
-mkdir -p old_vers/4
-cp migr_plan.md migr_plan_0.md … migr_plan_6.md migr_log.md \
-   Проверка.md Проверка_2.md ../README.md ../arch.md old_vers/4/
+cat >> ~/.ssh/config <<'EOF'
+
+Host mcp-vps
+    HostName 91.188.212.77
+    User t
+    IdentityFile ~/.ssh/id_ed25519_AI_9_vps
+    IdentitiesOnly yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    ExitOnForwardFailure yes
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 10m
+EOF
+chmod 600 ~/.ssh/config
 ```
+> ⚠️ `IdentityFile` — абсолютный путь. Ключ лежит в репозитории
+> (`AI_9/.ssh/…`); для `ssh` это допустимо, но **копию** ключа лучше держать в
+> `~/.ssh/` (решение оператора; если перенесём — правим путь в блоке).
 
-### Шаг 2. Фиксация baseline (L1–L4 + гейт) — как есть, без изменений
-Определить интерпретатор и прогнать существующий тестовый контур.
+**Проверка:** `ssh -o BatchMode=yes mcp-vps 'whoami; hostname'` → `t`, без пароля.
 
-- L1 — компиляция всей сборки:
-  ```bash
-  PY -m py_compile Kod.py core/*.py memory/*.py storage/*.py integrations/mcp/*.py
-  ```
-- L2 — юнит-тесты без живого ключа:
-  ```bash
-  env -u API_KEY PY dev/tests_debug/unit_runner.py
-  ```
-- L3 — смоук полного цикла:
-  ```bash
-  API_KEY=test-key PY dev/tests_debug/smoke.py
-  ```
-- L4 — сценарные тесты задания:
-  ```bash
-  API_KEY=test-key PY dev/tests_debug/scenario.py
-  ```
-- Гейт приёмки:
-  ```bash
-  API_KEY=test-key bash dev/tests_debug/check_acceptance.sh
-  ```
-
-Ожидание: L1 EXIT=0; L2 122 OK/0 FAIL; L3 SMOKE OK; L4 SCENARIO OK; гейт 21/21.
-
-### Шаг 3. Сверка дерева с §0.3 плана-эталона (что есть / чего нет)
-Зафиксировать расхождения до требования дня 18 (привязать к этапам M1–M6):
-- нет планировщика/фоновых задач (M1, M2);
-- нет пайплайна `search → summarize → saveToFile` (M3);
-- нет MCP-серверов `scheduler`/`pipeline` в `DEFAULT_SERVERS` (M2, M3);
-- нет явного механизма выбора нужного инструмента среди серверов и длинного флоу (M4);
-- нет режима 24/7 (`--scheduler`) (M5);
-- `dev/Проверка.md` — не трёхсценарная (M6).
-
-### Шаг 4. Изучение образца `doc/mcp/mcp-time-server`
-Зафиксировать как канон настройки новых серверов:
-- `time_server_http.py` — эталон: `mcp.server.mcpserver.MCPServer`, декоратор
-  `@mcp.tool()`, `TransportSecuritySettings(allowed_hosts=[...])`,
-  `mcp.streamable_http_app(...)`, запуск `uvicorn.run(app, host="0.0.0.0", port=8000)`;
-- `time_server_stdio_old.py` — устаревший stdio-вариант (`mcp.run()`); не использовать
-  для HTTP-режима.
-
-### Шаг 5. Фиксация точек внедрения (не менять)
-Перечислить модули, которые миграция **не трогает**:
-`core/state_machine.py` (`TaskStage` 8 стадий), `core/invariants.py`, `memory/*`,
-`storage/db.py`, базовые контракты `core/llm_client.py`/`core/prompt_builder.py`,
-MCP-инфраструктура Ревизий 2–3 (`integrations/mcp/{config,transport,client,gateway,
-provider,demo_server}.py`, `core/{tools,tool_registry,tool_policy,tool_executor}.py`).
-
-### Шаг 6. Подготовка служебки: очистка `dev/migr_log.md` под Ревизию 4
-Заменить шапку и записи журнала на шапку Ревизии 4 (история прошлых ревизий — в
-`old_vers/`), затем внести запись этапа M0 по шаблону §6.4 плана-эталона.
-
-### Шаг 7. Восстановление рабочего окружения (при необходимости)
-Ожидаемый venv недели `AI_9/.venv` отсутствовал (он не под git). Восстановить его и
-поставить зависимости проекта, иначе ни тестовый контур, ни MCP-серверы не
-запускаются:
+### ШАГ 0.2 — Linger для пользователя `t` (VPS)
+Без него `systemctl --user` живёт только время SSH-сессии → сервисы будут умирать.
 ```bash
-cd /home/t/doc/AI_9
-/usr/bin/python3 -m venv .venv
-./.venv/bin/pip install --upgrade pip
-./.venv/bin/pip install requests python-dotenv mcp uvicorn
+loginctl enable-linger t || sudo loginctl enable-linger t
+loginctl show-user t --property=Linger
+ls -d /run/user/$(id -u)
 ```
-Проверка: `./.venv/bin/python -c "import requests, dotenv, mcp, uvicorn"`.
+**Ожидаемо:** `Linger=yes`, каталог `/run/user/1001` существует.
 
-> Секреты только из `.env` (`API_KEY`, `MCP_SERVER_URL`, `SCHEDULER_MCP_URL`,
-> `PIPELINE_MCP_URL`); `.env` в репозиторий не коммитить.
+### ШАГ 0.3 — Узкий sudoers-белый список (VPS, только через `visudo`)
+Даёт агенту `sudo -n` **только** для перечисленного; пароль не нужен и не светится.
+```bash
+sudo visudo -f /etc/sudoers.d/mcp-ops
+```
+Содержимое файла:
+```sudoers
+# AI_9: узкие root-права для управления MCP-серверами на учебном VPS
+t ALL=(root) NOPASSWD: /usr/bin/loginctl enable-linger t
+t ALL=(root) NOPASSWD: /usr/bin/loginctl show-user t
+t ALL=(root) NOPASSWD: /usr/sbin/ufw allow 8000/tcp
+t ALL=(root) NOPASSWD: /usr/sbin/ufw allow 8010/tcp
+t ALL=(root) NOPASSWD: /usr/sbin/ufw allow 8020/tcp
+t ALL=(root) NOPASSWD: /usr/sbin/ufw status verbose
+t ALL=(root) NOPASSWD: /usr/sbin/ufw show added
+```
+Затем:
+```bash
+sudo -n ufw status verbose
+sudo -n -l
+```
+**Ожидаемо:** `visudo` принимает синтаксис; `sudo -n ufw status verbose` проходит
+**без запроса пароля**; `sudo -n -l` показывает ровно эти команды.
+
+### ШАГ 0.4 — Открыть публичные порты MCP (VPS)
+```bash
+sudo -n ufw allow 8000/tcp
+sudo -n ufw allow 8010/tcp
+sudo -n ufw allow 8020/tcp
+sudo -n ufw status verbose
+```
+**Ожидаемо:** три правила `ALLOW IN … 8000/8010/8020/tcp`.
+> Если `ufw` выключен (`Status: inactive`) — правила не нужны, но фиксируем это в
+> журнале: тогда барьер только в панели провайдера.
+
+### ШАГ 0.5 — Security group провайдера (веб-консоль, только оператор)
+В панели хостинга открыть **TCP 8000, 8010, 8020** (входящие, source `0.0.0.0/0`).
+Это единственный шаг, недоступный из SSH.
+
+### ШАГ 0.6 — Проверка снаружи (локальная машина)
+```bash
+for p in 8000 8010 8020; do
+  timeout 6 bash -c "cat < /dev/null > /dev/tcp/91.188.212.77/$p" 2>/dev/null \
+    && echo "$p ОТКРЫТ" || echo "$p закрыт/фильтруется"
+done
+```
+**Ожидаемо на выходе этапа:** `8000` может быть ещё закрыт (сервер не запущен — это
+этап 1), но **фильтрации по firewall быть не должно**: `connection refused`, а не
+таймаут. 8010/8020 — аналогично (серверов ещё нет).
+
+### ШАГ 0.7 — Журнал
+Запись «Этап 0» в `dev/migr_log.md` по шаблону §6.3 мастер-плана (было/стало/
+живой прогон/гейт). Коммитов на этом этапе нет (локальные файлы проекта — на
+усмотрение оператора, VPS как git-репозиторий не менялся).
 
 ---
 
-## 3. Выход этапа (артефакты)
+## Выход этапа
+- `ssh mcp-vps` — без пароля;
+- `Linger=yes`, `/run/user/1001` есть;
+- `sudo -n ufw status verbose` — без пароля, белый список работает;
+- порты 8000/8010/8020 разрешены в ufw и в панели провайдера.
 
-- `dev/old_vers/4/` — снимок состояния на входе Ревизии 4.
-- `dev/migr_plan_0.md` — этот рабочий план.
-- `dev/migr_log.md` — очищен под Ревизию 4 + запись этапа M0.
-- `AI_9/.venv` — рабочее окружение (вне git).
+## Гейт 0→1 (все пункты зелёные)
+1. `ssh -o BatchMode=yes mcp-vps 'whoami'` → `t`, exit 0.
+2. `ssh mcp-vps 'loginctl show-user t --property=Linger'` → `Linger=yes`.
+3. `ssh mcp-vps 'sudo -n ufw status verbose'` → exit 0 (без пароля) + правила видны.
+4. `ssh mcp-vps 'sudo -n -l'` → список совпадает с белым списком (шире — красный).
+5. Локальный TCP-тест 8000/8010/8020 → **refused**, а не timeout (значит файрвол
+   не мешает; «сервер не запущен» — норма до этапа 1).
 
----
-
-## 4. Гейт M0→M1 (критерии)
-
-- [x] Baseline зафиксирован: L1 EXIT=0; L2 122 OK/0 FAIL; L3 SMOKE OK; L4 SCENARIO OK;
-      гейт 21/21 (FAIL=0).
-- [x] Расхождения перечислены и привязаны к M1–M6.
-- [x] Эталон сервера `doc/mcp/mcp-time-server/time_server_http.py` изучён.
-- [x] Точки внедрения зафиксированы.
-- [x] Служебка готова (`old_vers/4/`, `migr_log.md` очищен под Ревизию 4).
-- [x] Рабочее окружение восстановлено.
-
-**Переход M0→M1** — только при полном выполнении критериев; затем **обязательное
-перечитывание** `dev/migr_plan.md` и создание `dev/migr_plan_1.md`.
+## Откат
+- `~/.ssh/config`: удалить добавленный блок (или закомментировать).
+- sudoers: `sudo rm /etc/sudoers.d/mcp-ops` (файл отдельный — основной конфиг не тронут).
+- ufw: `sudo ufw delete allow 8000/tcp` (и 8010, 8020).
+- linger: `loginctl disable-linger t`.
+- Панель провайдера: закрыть правила.

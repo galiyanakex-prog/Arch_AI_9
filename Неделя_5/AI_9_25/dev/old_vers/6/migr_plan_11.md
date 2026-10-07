@@ -1,56 +1,56 @@
-# migr_plan_11.md — Этап 11. D7: авторизация транспорта
+# Этап 11 — Финал: живой прогон, гейт, синхронизация (Ф)
 
-> Рабочий план-алгоритм **одного этапа** на основе `dev/migr_plan.md` (Ревизия 5).
-> Контур: **D (правки продукта)**. Метка: **D7**. Коммиты — только за оператором.
+> Мастер-план: `dev/migr_plan.md` §4 «Этап 11», §5 границы, §6, §8 (DoD).
+> Цель: доказать, что Ревизия 6 работает целиком, и синхронизировать документацию
+> с кодом. Финальный гейт — **33/33**.
 
-## Цель этапа
-`MCPServerConfig.headers`/`token_env` → `HttpMCPTransport` шлёт `Authorization`;
-серверная часть проверяет токен. **Не блокирует** финал, пока серверы публичные
-и без секретов (проверка выключена, если env `MCP_AUTH_TOKEN` не задан).
+## Что уже есть (этапы 0–10)
 
-## Предусловия (выполнено)
-- Этап 4 ✅: D7 воспроизведён (транспорт не шлёт заголовки).
-- Этапы 5–10 ✅: D1/D2/D5/D3/D4/D6 закрыты; регрессия зелёная.
-
-## Границы этапа
-Правки: `integrations/mcp/config.py`, `integrations/mcp/transport.py`,
-`integrations/mcp/auth.py` (новое), `time_server.py`/`scheduler_server.py`/
-`pipeline_server.py`. Секрет — только в env, не в коде/конфиге.
-
----
+- `rag/` полностью реализован: chunking (2 стратегии), embedding (Ollama bge-m3 +
+  Hashing-фолбэк), index (плоский, инкрементальный), retrieval (bm25/dense/hybrid),
+  rerank, eval, compare, cache, grounding, service (фасад).
+- Интеграция: `--rag`, `/rag …`, блок `[rag]` в промпте, grounding strict.
+- Транскрипты: `stages/rag_chunking_compare.md`, `rag_grounding_live.md`,
+  `rag_cache_live.md`.
+- Гейт 25/25; L2 244 OK; `requirements.txt` не тронут.
 
 ## Шаги
 
-### ШАГ 11.1 — конфиг
-`MCPServerConfig.headers: dict` + `token_env: str | None`; `_parse_server` читает их.
+| # | Шаг | Файл | Содержание |
+|---|---|---|---|
+| 11.1 | Живые прогоны | `dev/logs_reports/stages/rag_*` | индексация корпуса на bge-m3; `--rag-search` (5 запросов); REPL-демо «вопрос → источники → ответ со ссылками»; `--rag-eval`; `--rag-compare` — транскрипты |
+| 11.2 | Сценарий | `dev/tests_debug/scenario/scen_rag.md` | ручная демонстрация RAG (шаги, ожидаемый вывод) |
+| 11.3 | Гейт | `dev/tests_debug/check_acceptance.sh` | **+8 проверок** (25 → 33): импорт `rag`; индекс строится; поиск отдаёт ≥1 хит с метаданными; обе стратегии чанкинга; отчёт сравнения существует; без `--rag` промпт без `[rag]`; RAG не меняет `TaskStage`; `--rag-eval` hit-rate@5 ≥ 0.80 |
+| 11.4 | README | `README.md` | раздел «RAG-индексация и поиск по документам» (назначение, запуск Ollama, команды, примеры вывода) |
+| 11.5 | arch | `arch.md` | слой `rag/` в дереве модулей, направление зависимостей, конвейер, границы |
+| 11.6 | Итог | `dev/migr_log.md` | «Итог Ревизии 6» + предложить коммит |
+| 11.7 | Регрессия | — | L2/L3/L4 + гейт 33/33; `requirements.txt` пуст |
 
-### ШАГ 11.2 — клиентский транспорт
-`HttpMCPTransport(headers, token_env)`; `_auth_headers()` = статические заголовки +
-`Authorization: Bearer <env>`; передача через `httpx2.AsyncClient(headers=...)`
-в `streamable_http_client(http_client=...)`; `close()` закрывает http_client.
-`make_transport` пробрасывает поля.
+## Гейт (финальный) — 33/33
 
-### ШАГ 11.3 — серверная проверка
-`integrations/mcp/auth.py::auth_middleware(app, token_env="MCP_AUTH_TOKEN")`:
-если env задан — требовать `Authorization: Bearer <token>`, иначе 401; если не
-задан — проверка выключена. Подключено в трёх серверах.
-
-### ШАГ 11.4 — тесты + живой прогон
-`dev/tests_debug/unit/test_d7_auth.py` (6 функций); живой `run_live_d7.sh`:
-публичный сервер → подключение; сервер с токеном → без токена 401, с токеном READY;
-проверка 35 в гейте.
-
----
-
-## Гейт 11→12 (живой)
-| # | Проверка | Ожидаемо |
+| # | Проверка | Критерий |
 |---|---|---|
-| 1 | unit `test_d7_auth` | 6 OK |
-| 2 | живой: публичный сервер | подключён (1 тул) |
-| 3 | живой: сервер с токеном, клиент без токена | отклонён (401) |
-| 4 | живой: сервер с токеном, клиент с токеном | подключён (1 тул) |
-| 5 | регрессия L2/L3/L4/гейт | 148 OK · SMOKE OK · SCENARIO OK · 25/25 |
+| 1–25 | прежние проверки | без регрессии |
+| 26 | импорт `rag` | `import rag` работает |
+| 27 | индекс строится | `--rag-ingest` → чанки > 0 |
+| 28 | поиск отдаёт ≥1 хит с метаданными | `source`/`section`/`chunk_id` |
+| 29 | обе стратегии чанкинга | `fixed` и `structural` дают разное разбиение |
+| 30 | отчёт сравнения существует | `stages/rag_chunking_compare.md` |
+| 31 | без `--rag` промпт без `[rag]` | байт-в-байт прежний |
+| 32 | RAG не меняет `TaskStage` | стадии не затронуты |
+| 33 | `--rag-eval` hit-rate@5 ≥ 0.80 | да |
 
-## Перечитывание
-После гейта — перечитать `dev/migr_plan.md` (§4 «Этап 12», §6) и создать
-`dev/migr_plan_12.md`.
+## Границы (не нарушаем)
+
+- `rag/` не импортирует `core/`; `core/` не импортирует `rag/`.
+- `TaskStage` не меняется; RAG off по умолчанию; сеть — только localhost.
+- Новых pip-зависимостей нет; `requirements.txt` не меняется.
+- Юниты зелёные **без** Ollama (фолбэк Hashing).
+- Коммит выполняет **только** оператор.
+
+## Откат
+
+```bash
+git checkout -- dev/tests_debug/check_acceptance.sh README.md arch.md dev/migr_log.md
+rm -f dev/tests_debug/scenario/scen_rag.md dev/migr_plan_11.md
+```

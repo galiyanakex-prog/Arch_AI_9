@@ -73,6 +73,11 @@ class RetrievalConfig:
     mode: str = "hybrid"                # "bm25" | "dense" | "hybrid"
     candidate_k: int = 50
     final_k: int = 5
+    # Порог отсечения нерелевантных результатов (этап 8, часть 2 Задание.txt).
+    # Скор — нормированный RRF гибрида (0..~0.033); 0.0 = порог выключен.
+    # Значение подобрано замером: на golden-датасете отсекает «хвост», не роняя
+    # hit-rate@5 (см. migr_log.md, этап 8).
+    threshold: float = 0.0
     rrf_k: int = 60
     # Веса RRF по надёжности ретриверов (этап 7). Dense (bi-encoder, bge-m3) —
     # основной ретривер по модели куратора (N5_audio: «bi-encoder Top-20»), BM25 —
@@ -118,6 +123,24 @@ class BudgetConfig:
 
 
 @dataclass(frozen=True)
+class UnknownConfig:
+    """Режим «не знаю» (часть 3 Задание.txt): при слабом контексте — уточнение."""
+    enabled: bool = True
+    message: str = "В источниках нет ответа на этот вопрос. Уточните, пожалуйста, что именно нужно."
+
+
+@dataclass(frozen=True)
+class RewriteConfig:
+    """Query rewrite (часть 2 Задание.txt, этап 8): переформулировка запроса.
+
+    `enabled` — включать rewrite по умолчанию (флаг `--rag-rewrite` имеет приоритет);
+    `mode` — `heuristic` (детерминированно, без LLM) | `llm` (тратит токены).
+    """
+    enabled: bool = False
+    mode: str = "heuristic"             # "heuristic" | "llm"
+
+
+@dataclass(frozen=True)
 class RagConfig:
     corpus: CorpusConfig = field(default_factory=CorpusConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
@@ -127,6 +150,8 @@ class RagConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     grounding: GroundingConfig = field(default_factory=GroundingConfig)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
+    unknown: UnknownConfig = field(default_factory=UnknownConfig)
+    rewrite: RewriteConfig = field(default_factory=RewriteConfig)
     index_dir: str = "rag/index"
     enabled: bool = False               # RAG выключен по умолчанию
 
@@ -170,6 +195,9 @@ class RagConfig:
                 patch.get("retrieval", self.retrieval), final_k=int(os.environ["AI9_RAG_TOP_K"]))
         if os.getenv("AI9_RAG_GROUNDING"):
             patch["grounding"] = dataclasses.replace(self.grounding, mode=os.environ["AI9_RAG_GROUNDING"])
+        if os.getenv("AI9_RAG_REWRITE_MODE"):
+            patch["rewrite"] = dataclasses.replace(
+                self.rewrite, mode=os.environ["AI9_RAG_REWRITE_MODE"].strip().lower())
         if os.getenv("OLLAMA_EMBED_URL"):
             emb["url"] = os.environ["OLLAMA_EMBED_URL"]
         if os.getenv("OLLAMA_EMBED_MODEL"):
@@ -192,6 +220,8 @@ class RagConfig:
             raise RagConfigError(f"неизвестный режим ретривера: {self.retrieval.mode}")
         if self.grounding.mode not in ("off", "warn", "strict"):
             raise RagConfigError(f"неизвестный режим grounding: {self.grounding.mode}")
+        if self.rewrite.mode not in ("heuristic", "llm"):
+            raise RagConfigError(f"неизвестный режим rewrite: {self.rewrite.mode}")
         return self
 
     def to_dict(self) -> dict:
@@ -211,6 +241,8 @@ SECTION_CLASSES = {
     "cache": CacheConfig,
     "grounding": GroundingConfig,
     "budget": BudgetConfig,
+    "unknown": UnknownConfig,
+    "rewrite": RewriteConfig,
     "bm25": Bm25Config,
 }
 

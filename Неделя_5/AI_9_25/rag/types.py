@@ -120,3 +120,48 @@ class GroundingReport:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class Source:
+    """Источник ответа (часть 3 Задание.txt): путь + раздел + chunk_id + скор."""
+    source: str                     # путь к файлу
+    section: str                    # "A > B > C" ("" — начало файла)
+    chunk_id: str                   # "<doc_id>#<номер>" (уникален в индексе)
+    score: float = 0.0              # скор хита
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Quote:
+    """Цитата (часть 3 Задание.txt): дословный фрагмент найденного чанка."""
+    chunk_id: str
+    text: str                       # дословный фрагмент (из чанка, не из ответа)
+    source: str                     # путь файла-источника
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class Answer:
+    """Ответ RAG-функции (часть 1 Задание.txt): вопрос → поиск → LLM.
+
+    Часть 3 добавляет обязательные `sources`/`quotes`/`verdict`: ответ обязан
+    нести список источников (source + section/chunk_id) и дословные цитаты, а
+    при слабом контексте — режим «не знаю» (verdict="insufficient").
+    """
+    text: str                       # ответ LLM
+    used_rag: bool = False          # режим: с блоком [rag] или без
+    hits: tuple = ()                # найденные чанки (Hit) — для отчёта/источников
+    sources: tuple = ()             # list[Source]
+    quotes: tuple = ()              # list[Quote]
+    verdict: str = "unchecked"      # ok | partial | hallucination | insufficient | unchecked
+    latency_ms: float = 0.0         # время ответа
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+

@@ -43,6 +43,18 @@
 > передача данных); (3) **несколько MCP-серверов** (выбор инструмента, маршрутизация,
 > длинный флоу). История Ревизии 3 сохранена в `dev/old_vers/4/`; журнал — `dev/migr_log.md`
 > (этапы M0–M6). Сценарий ручной проверки — `dev/Проверка.md` (три сценария).
+>
+> **Ревизия 5 (день 20, 2026-10-01).** Инфраструктурный контур VPS (этапы 0–3:
+> доступ/привилегии, `time` под `systemd --user`, скрипты отладки + живая база,
+> `scheduler:8010` + `pipeline:8020`) и **пакет правок дефектов продукта** (этапы
+> 4–12, метки D1–D7, M0/M7): D1 — порог probe + `enabled`-политика серверов;
+> D2 — каталог инструментов в промте (`render_tool_protocol`); D3 — мультисерверный
+> длинный флоу; D4 — осмысленный выбор инструмента (`core/tool_routing.py` +
+> `/mcp route`); D5 — таймауты транспорта (`asyncio.wait_for`); D6 — пакет мелких
+> исправлений (`/mcp connect <id>` только целевой сервер, полный `text` результата,
+> терминальные стадии read-only, валидный `tool_calls`); D7 — авторизация транспорта
+> (`Authorization: Bearer` + серверный 401). История Ревизии 4 сохранена в
+> `dev/old_vers/5/`; журнал — `dev/migr_log.md` (этапы 0–12).
 
 ---
 
@@ -878,9 +890,34 @@ read-only тулов, local-провайдер, сравнение токен-ф
    (status/servers/tools/refresh/connect/call/disconnect) + флаги `--mcp`,
    `--mcp-probe`; REPL синхронный (async — внутри gateway).
 6. **Служебное** (`dev/`) — миграция по плану-эталону (Ревизия 2, M0–M12; Ревизия 3,
-   M0–M6; Ревизия 4, M0–M6), L2 (+test_mcp.py на FakeMCPTransport), L4
-   (+scenario_mcp_discovery, scenario_llm_tool_use, scenario_tool_denied), гейт 21/21,
-   приёмка 54/54; сценарий ручной проверки `dev/Проверка.md` (три сценария дня 20).
+   M0–M6; Ревизия 4, M0–M6; Ревизия 5, этапы 0–12), L2 (+test_mcp.py на FakeMCPTransport),
+   L4 (+scenario_mcp_discovery, scenario_llm_tool_use, scenario_tool_denied,
+   scenario_multiserver_flow), гейт 25/25, приёмка 54/54; сценарий ручной проверки
+   `dev/Проверка.md` (три сценария дня 20).
+
+### 7.2.2 Дополнение дня 20 (Ревизия 5)
+
+Инфраструктурный контур VPS (этапы 0–3) и пакет правок дефектов продукта (этапы 4–12):
+
+- **D1** — порог probe (`≥1 READY` + непустой список) + `enabled`-политика серверов
+  (`SCHEDULER_MCP_ENABLED`/`PIPELINE_MCP_ENABLED`, по умолчанию `False`); `overall_state()`
+  не менялся.
+- **D2** — каталог инструментов в промте: `render_tool_protocol(tools)` в
+  `core/llm_client.py`, используется в `Agent._respond_with_tools`; флаг `--no-tools-block`.
+- **D3** — мультисерверный длинный флоу (`scenario_multiserver_flow`): 5 вызовов разных
+  серверов в одном запросе, порядок и маршрутизация подтверждены вживую.
+- **D4** — осмысленный выбор инструмента: `core/tool_routing.py` (`rank_tools`, чистая
+  функция, RU→EN-эвристика, без SDK/сети) + `/mcp route` печатает кандидата с обоснованием.
+- **D5** — таймауты транспорта: `_SessionTransport._with_timeout` (`asyncio.wait_for`)
+  в `list_tools`/`call_tool`/`initialize`.
+- **D6** — пакет мелких исправлений: `/mcp connect <id>` поднимает только целевой сервер;
+  `ToolExecutionResult.text` (полный) рядом с `summary` (≤500); терминальные стадии
+  (done/failed/paused) — только read-only; assistant-сообщение с валидным `tool_calls`.
+- **D7** — авторизация транспорта: `MCPServerConfig.headers`/`token_env` →
+  `Authorization: Bearer`; серверный `auth_middleware` (401 без токена; выключен без env).
+
+Неизменны: `TaskStage`, `InvariantChecker`, память, `PromptBuilder`-контракты,
+`MCP off` по умолчанию; SDK — только в `integrations/mcp/`.
 
 ### 7.2.1 Дополнение дня 20 (Ревизия 4)
 

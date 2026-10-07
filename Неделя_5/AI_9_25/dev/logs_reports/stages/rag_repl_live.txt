@@ -1,0 +1,29 @@
+[Память] Пользователь «w17» найден, контекст загружен. Задача: Основная_задача
+[Режим] Доставка слоёв: ['invariants', 'long_term', 'profile', 'rag', 'short_term', 'working']
+[Режим] MockClient (заглушка) — живых запросов к API не будет.
+[Режим] RAG: включён (hybrid, топ-5), в промпт подмешивается; индекс: 117 чанков / 9 документов; Ollama: доступна; grounding: strict
+[Планировщик] Фон выключен (запустите с флагом --scheduler для 24/7).
+Команды: /memory /profile [list|show|use|new|route|auto] /tasks /task [retry] /plan /approve /goto /transitions /step /run /pause /resume /deliver /compare /summary /state /tokens /cost /mcp summary|jobs|pipeline|route /rag status|on|off|ingest|find|stats|eval|check /help /exit
+
+Вы [Основная_задача]: [RAG] Включён: следующий запрос обогатится блоком [rag].
+
+Вы [Основная_задача]: [RAG] Запрос «бюджет токенов промпта»: Найдено источников: 4
+
+  1. [b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#42] dev/Проверка.md · раздел: Проверка_2.md — короткий сценарий ручной проверки (день 20, живой прогон) > Ревизия 7 — RAG-модуль (части 1–4 `Задание.txt`) · score=0.0180
+     ```bash env -u API_KEY .venv/bin/python Kod.py --rag-ask "как считается бюджет токенов в промпте" env -u API_KEY .venv/bin/python Kod.py --rag-eval env -u API_KEY .venv/bin/python Kod.py --rag-verify ```
+
+  2. [2180fabb3ba04a0c91cb6d515453f1a0421de70b#2180fabb3ba04a0c91cb6d515453f1a0421de70b#0] core/prompt_builder.py · раздел: -*- coding: utf-8 -*- · score=0.0177
+     # -*- coding: utf-8 -*- """Сборка промта явными блоками + дозированная доставка + токен-бюджет. Порядок блоков (канон): [system: роль] → [system: профиль] → [system: инварианты] → [system: долговременная] → [system: рабочая] → [system: summary общего префикса, опц.] → [messages: краткосрочная] → [us…
+
+  3. [2180fabb3ba04a0c91cb6d515453f1a0421de70b#2180fabb3ba04a0c91cb6d515453f1a0421de70b#15] core/prompt_builder.py · раздел: ответа кодом — grounding, этап 9. · score=0.0171
+     {ref} {where}" + (f" · {title}" if title else "") + (f" · раздел: {section}" if section else ""), f" {fragment}"] cost = estimator("\n".join(entry)) if used + cost > budget: continue lines.extend(entry) used += cost n_placed += 1 if not n_placed: return "" lines.append("") lines.append(RAG_INSTRUCTI…
+
+  4. [db63ce0832be10d6e3ac0eb18696bc4f8a9198d7#db63ce0832be10d6e3ac0eb18696bc4f8a9198d7#2] ND/models/bge-m3_params.md · раздел: BGE-M3 (bge-m3) > Характеристики · score=0.0173
+     | Параметр | Значение | |---|---| | Размерность вектора (dim) | **1024** | | Контекстное окно | 8192 токена | | Языки | мультиязычная (RU + EN и др.) | | Размер модели | ~1.2 ГБ | | Дата релиза | 2024 |
+
+Вы [Основная_задача]: [RAG] Состояние: включён; блок в промте: да
+  Индекс: 117 чанков / 9 документов, dim=1024, модель: ollama:bge-m3
+  Режим: hybrid; стратегия чанкинга индекса: structural; каталог: /home/u/Документы/111111/Обучение_Курсы/Основной_репозиторий/AI_9/rag/index
+  Ollama (http://127.0.0.1:11434): доступна
+
+Вы [Основная_задача]: [Выход] Состояние сохранено. До встречи!

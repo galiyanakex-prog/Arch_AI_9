@@ -16,6 +16,7 @@
 from dataclasses import asdict, replace
 from datetime import datetime
 import json
+import re
 import time
 
 from memory.base import MemoryContext, MemoryItem
@@ -243,6 +244,11 @@ class Agent:
         self.rag_mode = None           # None → cfg.retrieval.mode
         # Последние найденные чанки (для /rag check на этапе 9 и объяснимости).
         self.last_rag_hits = []
+        # Метаданные последнего ответа (часть 3, этап 10): источники/цитаты/вердикт.
+        # Заполняются в respond() при активном RAG; Kod.py печатает источники.
+        self.last_answer_sources: list = []
+        self.last_answer_quotes: list = []
+        self.last_answer_verdict: str = "unchecked"
         # Кэш поиска в пределах ОДНОГО обмена: Kod.py после respond() пересобирает
         # контекст для оценки токенов — повторный поиск по тому же запросу не нужен
         # (каждый dense-поиск = вызов эмбеддера). Инвалидация — по message_counter.
@@ -713,6 +719,30 @@ class Agent:
                  f"(verdict={report2.verdict if report2 else 'unchecked'})")
         return candidate
 
+    def _enrich_query(self, query: str) -> str:
+        """Добавить к запросу цель/термины из памяти задачи (часть 4, этап 11).
+
+        Только если вопрос короткий (≤ 3 значимых слов) — иначе не портим точный
+        поисковый запрос. Ошибки чтения памяти не роняют поиск.
+        """
+        try:
+            ctx = MemoryContext(self.user_id, self.task, self.session_id)
+            data = self.memory.layers["working"].read(ctx)
+        except Exception:
+            return query
+        words = [w for w in re.findall(r"\w+", query or "") if len(w) >= 3]
+        if len(words) > 3:
+            return query
+        extra = []
+        if data.get("goal"):
+            extra.append(data["goal"])
+        terms = data.get("terms", {})
+        if isinstance(terms, dict):
+            extra.extend(terms.keys())
+        if not extra:
+            return query
+        return (query + " " + " ".join(extra)).strip()
+
     def _rag_retrieve(self, query: str) -> list:
         """Один поиск по RAG на запрос: сохранить last_rag_hits + строка [RAG] в лог.
 
@@ -727,17 +757,21 @@ class Agent:
         if self._rag_turn == self.message_counter:
             return self._rag_turn_hits
         started = time.time()
+        # Обогащение запроса памятью задачи (часть 4, этап 11): если в диалоге
+        # зафиксированы цель/термины, а вопрос короткий/местоименный — добавляем
+        # их к поисковому запросу, чтобы поиск учитывал контекст диалога.
+        search_query = self._enrich_query(query)
         try:
             if getattr(self.rag_service.cfg.retrieval, "multi_query", False):
                 # Multi-query (этап 10): переформулировки через LLM + склейка RRF.
                 # Токены переформулирования учитываются в оценке сессии.
-                variants = self.rag_service.rephrase(query, llm=self.llm.complete)
+                variants = self.rag_service.rephrase(search_query, llm=self.llm.complete)
                 self.last_grounding_extra_tokens += sum(
                     max(1, len(v) // 4) for v in variants)
                 hits = self.rag_service.search_multi(
-                    query, variants=variants, k=self.rag_top_k, mode=self.rag_mode)
+                    search_query, variants=variants, k=self.rag_top_k, mode=self.rag_mode)
             else:
-                hits = self.rag_service.search(query, k=self.rag_top_k, mode=self.rag_mode)
+                hits = self.rag_service.search(search_query, k=self.rag_top_k, mode=self.rag_mode)
         except Exception as exc:                     # страховка: фасад уже глотает
             self.log(f"[RAG] поиск не удался ({type(exc).__name__}: {exc}) — блок опущен")
             self.last_rag_hits = []
@@ -816,6 +850,11 @@ class Agent:
         # 1. Явное сохранение сообщения в краткосрочную память (source=user).
         self.remember_message("user", user_message, message_id)
 
+        # 1.5. Память задачи (часть 4 Задание.txt): детерминированно извлечь из
+        #      сообщения цель/уточнения/ограничения/термины и merge-нуть в working.
+        #      Делается ДО сборки промта, чтобы блок [working] уже нёс обновления.
+        self._update_task_memory(user_message, message_id)
+
         # 2. Сборка промта (дозированная доставка: только слои из self.deliver;
         #    бюджет: None — без обрезания, число — необязательные блоки опускаются).
         prompt_ctx = self.build_context(user_message)
@@ -837,10 +876,81 @@ class Agent:
         #      Делается ДО сохранения в память: в память должен лечь финальный ответ.
         answer = self._grounding_guard(messages, answer)
 
+        # 3.6. Источники/цитаты/вердикт ответа (часть 3, этап 10): при активном RAG
+        #      ответ несёт обязательные источники (source + section/chunk_id) и
+        #      цитаты. Kod.py печатает их после ответа. Контракты не меняются.
+        self._fill_answer_meta(answer)
+
         # 4. Сохранение ответа и обновление рабочей памяти (жизненный цикл).
         self.remember_message("assistant", answer, message_id + "a")
         self.log(f"[Агент] {message_id}: ответ получен (доставка: {sorted(self.deliver)})")
         return answer
+
+    # --- память задачи (часть 4 Задание.txt, этап 11) ---------------------------
+    _GOAL_RE = re.compile(r"(?:цель(?: диалога)?|задача)\s*[:\-—]\s*(.+)", re.IGNORECASE)
+    _CLARIFY_RE = re.compile(r"(?:уточняю|уточнение|то есть|а именно)\s*[:\-—]?\s*(.+)",
+                             re.IGNORECASE)
+    _CONSTRAINT_RE = re.compile(
+        r"(?:ограничение|нельзя|запрещено|только|обязательно)\s*[:\-—]?\s*(.+)",
+        re.IGNORECASE)
+    _TERM_RE = re.compile(
+        r"термин\s+«?([^»:\-—]+)»?\s*[:\-—]\s*(?:это\s+)?(.+)", re.IGNORECASE)
+
+    def _update_task_memory(self, user_message: str, message_id: str) -> None:
+        """Детерминированно извлечь память задачи из сообщения и merge-нуть в working.
+
+        Триггеры-фразы («цель: …», «уточняю: …», «ограничение: …», «термин X — это …»)
+        → поля goal/clarifications/constraints/terms. Merge, не перезапись. Ошибки не
+        роняют ответ. Пустое извлечение → ничего не пишем (нет лишних записей).
+        """
+        if not self.user_id:
+            return
+        text = (user_message or "").strip()
+        if not text:
+            return
+        updates = {}
+        goal = self._GOAL_RE.search(text)
+        if goal and goal.group(1).strip():
+            updates["goal"] = goal.group(1).strip()[:300]
+        clarify = self._CLARIFY_RE.search(text)
+        if clarify and clarify.group(1).strip():
+            updates["clarifications"] = clarify.group(1).strip()[:300]
+        constraint = self._CONSTRAINT_RE.search(text)
+        if constraint and constraint.group(1).strip():
+            updates["constraints"] = constraint.group(1).strip()[:300]
+        term = self._TERM_RE.search(text)
+        if term and term.group(1).strip() and term.group(2).strip():
+            updates["terms"] = {term.group(1).strip()[:100]: term.group(2).strip()[:200]}
+        if not updates:
+            return
+        try:
+            ctx = MemoryContext(self.user_id, self.task, self.session_id)
+            self.memory.remember("working", ctx, content=updates, source="system")
+            self.log(f"[Агент] память задачи обновлена: {sorted(updates)}")
+        except Exception as exc:
+            self.log(f"[Агент] память задачи не обновлена ({type(exc).__name__}: {exc})")
+
+    def _fill_answer_meta(self, answer: str) -> None:
+        """Заполнить last_answer_sources/quotes/verdict по последним hits (этап 10).
+
+        Без активного RAG или без источников — пустые списки и verdict=unchecked.
+        Ошибки фасада не роняют ответ (duck-typing + try/except).
+        """
+        self.last_answer_sources = []
+        self.last_answer_quotes = []
+        self.last_answer_verdict = "unchecked"
+        if not (self.rag_enabled and self.rag_service is not None and self.last_rag_hits):
+            return
+        try:
+            if hasattr(self.rag_service, "sources_for"):
+                self.last_answer_sources = self.rag_service.sources_for(self.last_rag_hits)
+            if hasattr(self.rag_service, "quotes_for"):
+                self.last_answer_quotes = self.rag_service.quotes_for(answer, self.last_rag_hits)
+            if hasattr(self.rag_service, "verdict_for"):
+                self.last_answer_verdict = self.rag_service.verdict_for(
+                    answer, self.last_rag_hits)
+        except Exception as exc:
+            self.log(f"[RAG] метаданные ответа не собраны ({type(exc).__name__}: {exc})")
 
     def _tool_specs(self, tools) -> list:
         """ToolDescriptor[] → спецификация OpenAI tools (function-calling)."""

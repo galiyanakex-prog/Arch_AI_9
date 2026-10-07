@@ -1,81 +1,118 @@
-# migr_plan_3.md — Этап 3. Второй/третий серверы на VPS (И3)
+# migr_plan_3.md — Этап 3. Текст и чанкинг: две стратегии (R1)
 
-> Рабочий план-алгоритм **одного этапа** на основе `dev/migr_plan.md` (Ревизия 5).
-> Контур: **И (инфраструктура VPS)**. Метка цели: **И3** (несколько MCP-серверов).
-> Коммиты — только за оператором.
+> Рабочий план **одного этапа** на основе `dev/migr_plan.md` (Ревизия 6, §4 «Этап 3»).
+> Контур: **R (реализация)**. Метка цели: **R1**. Зависимости: **этап 0** (контракты),
+> **этап 2** (корпус). Порядок: **пошагово с оператором**.
+> **Коммиты — только за оператором** (текст предложен в ШАГЕ 3.7).
 
 ## Цель этапа
-На VPS поднимаются `scheduler :8010` и `pipeline :8020` — реальные HTTP-MCP-серверы,
-управляемые тем же `deploy_services.sh`. Это материальная база для «несколько
-MCP-серверов» (`Задание_d20.txt`) и для мультисерверного флоу (этап 8).
+
+Реализовать `rag/text.py` (нормализация/токенизация/стемминг) и `rag/chunking.py`
+(**две стратегии** чанкинга — требование `Задание_d21.txt`) с полными метаданными.
+Первый юнит-модуль RAG: `test_rag_text.py`, `test_rag_chunking.py`.
 
 ## Предусловия (выполнено)
-- Этап 1 ✅: `time :8000` под `systemctl --user`, публичный доступ.
-- Этап 2 ✅: `dev/vps/` (mcp_vps.sh, deploy_services.sh, services.list, evidence/).
-- Серверы `scheduler_server.py`/`pipeline_server.py` уже в репозитории
-  (`integrations/mcp/`), порты 8010/8020, `allowed_hosts` с точным `IP:port`.
+
+- `rag/types.py` — `Chunk` заморожен (этап 0);
+- `rag/config.py` — `ChunkingConfig` (`size_tokens=400`, `overlap_ratio=0.15`,
+  `fixed_size_tokens=300`, `fixed_overlap_tokens=60`, `parent_max_tokens=1200`,
+  `keep_code_whole=True`);
+- `rag/datasets/corpus.list` — 9 файлов (этап 2);
+- `rag/text.py`, `rag/chunking.py` — заглушки с `NotImplementedError`.
 
 ## Границы этапа
-Не трогаем код серверов (только юниты + деплой). Не чиним D1 (этап 5). Не строим
-мультисерверный сценарий (этап 8) — только поднимаем серверы и доказываем
-`initialize`+`tools/list` снаружи.
+
+- **Не** считаем эмбеддинги (этап 4), **не** строим индекс (этап 5).
+- **Не** трогаем `Kod.py`, `core/`, `storage/`, `memory/`, `integrations/`.
+- **Не** добавляем pip-зависимостей (только stdlib).
+- **Не** реализуем S3 `semantic` (задел, не в гейте).
 
 ---
 
 ## Шаги
 
-### ШАГ 3.1 — юниты `mcp-scheduler-server.service`, `mcp-pipeline-server.service`
-`dev/vps/units/`, по образцу `mcp-time-server.service` (общий venv, `Restart=always`,
-`WantedBy=default.target`, env `SCHEDULER_PORT`/`PIPELINE_PORT`).
+### ШАГ 3.1 — `rag/text.py` (агент)
 
-### ШАГ 3.2 — `services.list` → три сервера
-`mcp-time-server:8000`, `mcp-scheduler-server:8010`, `mcp-pipeline-server:8020`.
+Публичный API (контракт этапа 0 сохраняется):
 
-### ШАГ 3.3 — деплой
-```bash
-scp dev/vps/units/*.service dev/vps/services.list mcp-vps:/home/t/doc/AI_9/dev/vps/...
-ssh mcp-vps 'cd /home/t/doc/AI_9 && bash dev/vps/deploy_services.sh'
-```
-> ⚠ Найден и исправлен баг `deploy_services.sh`: `while read` терял последнюю
-> строку без `\n` → добавлено `|| [ -n "$name" ]`.
+| Функция | Назначение |
+|---|---|
+| `normalize(text)` | NFKC + casefold + снятие пунктуации (для BM25) |
+| `tokenize(text)` | список токенов (слова + числа) |
+| `stem(word)` | лёгкий рус. стеммер (оконечные правила) |
+| `split_sentences(text)` | сплит по `.` `!` `?` `…` с учётом сокращений |
+| `est_tokens(text)` | эвристика `len(text)//4` (явно помечена как приближение) |
+| `normalize_code(text)` | для кода: регистр сохраняется, `snake_case` дробится |
+| `STOPWORDS` | стоп-слова RU+EN из `rag/stopwords_ru_en.txt` |
 
-### ШАГ 3.4 — `.env`: публичные адреса scheduler/pipeline
-```bash
-printf 'SCHEDULER_MCP_URL=http://91.188.212.77:8010/mcp\nPIPELINE_MCP_URL=http://91.188.212.77:8020/mcp\n' >> .env
-```
-> Дефолты `config.py` — `127.0.0.1` (для клиента **на** VPS). С локальной машины
-> нужен публичный адрес, иначе `connection refused` маскируется под
-> `Cancelled via cancel scope`.
+### ШАГ 3.2 — `rag/stopwords_ru_en.txt` (агент)
 
-### ШАГ 3.5 — живой probe 8010/8020
-```bash
-./dev/vps/mcp_vps.sh probe 8010
-./dev/vps/mcp_vps.sh probe 8020
-```
-**Ожидаемо:** session-id + тулы (7 у scheduler, 4 у pipeline).
+Список стоп-слов (RU + EN), по одному на строку, `#` — комментарий.
 
-### ШАГ 3.6 — регрессия + запись в журнал
-L2/L3/L4/гейт; запись «Этап 3» в `dev/migr_log.md`.
+### ШАГ 3.3 — `rag/chunking.py` (агент)
+
+| Код | Имя | Правила |
+|---|---|---|
+| **S1** | `fixed` | окно `size=300` токенов, `overlap=60`; граница — по концу предложения; хвост < 40 токенов → к предыдущему |
+| **S2** | `structural` | границы по md-заголовкам и блокам кода/таблиц; секция > 400 → допил по предложениям с `overlap=15%`; код/таблицы **не режутся**; parent-child (родитель ≤ 1200) |
+| S3 | `semantic` | задел (не в гейте) |
+
+Контракт `doc` — dict: `{doc_id, source, title, text}`. Возврат — `list[Chunk]`.
+
+### ШАГ 3.4 — `test_rag_text.py` (агент)
+
+Проверки: `normalize` снимает регистр/пунктуацию; `tokenize` даёт слова; `stem`
+сводит формы; `split_sentences` не рвёт сокращения; `est_tokens` ≈ len/4;
+`normalize_code` сохраняет регистр и дробит `snake_case`.
+
+### ШАГ 3.5 — `test_rag_chunking.py` (агент)
+
+Проверки: обе стратегии дают чанки на реальном файле корпуса; метаданные заполнены
+у 100%; длина в целевом диапазоне; overlap 10–20%; код-блок не разрезан; `section`
+корректен для вложенных заголовков; пустой/битый файл не роняет; CRLF и BOM пережиты;
+**S1 и S2 дают разное число чанков**.
+
+### ШАГ 3.6 — Прогон тестов и гейт (агент)
+
+`unit_runner.py test_rag_text`, `unit_runner.py test_rag_chunking`, затем полный
+контур (регрессия).
+
+### ШАГ 3.7 — Запись в журнал + перечитывание плана
 
 ---
 
-## Гейт 3→4
-| # | Проверка | Ожидаемо |
-|---|---|---|
-| 1 | `mcp_vps.sh status` | три сервиса `active`, порты 8000/8010/8020 |
-| 2 | `probe 8010` | session-id + 7 тулов планировщика |
-| 3 | `probe 8020` | session-id + 4 тула пайплайна |
-| 4 | `Kod.py --mcp-probe` (все живы) | все READY, 15 тулов, exit 0 |
-| 5 | регрессия L2/L3/L4/гейт | 122 OK · SMOKE OK · SCENARIO OK · 21/21 |
-| 6 | код продукта не изменён | `git diff` пуст по `Kod.py`, `core/`, `integrations/` |
+## Выход этапа
 
-## Риски этапа
-| Риск | Проявление | Действие |
-|---|---|---|
-| `while read` теряет последнюю строку | pipeline не деплоится | `|| [ -n "$name" ]` (исправлено) |
-| `127.0.0.1` в дефолтах | `Cancelled via cancel scope` | публичный адрес в `.env` |
-| Порт закрыт панелью | `timeout` | шаг 0.5 мастер-плана |
+- `rag/text.py`, `rag/chunking.py` — реализованы;
+- `rag/stopwords_ru_en.txt` — создан;
+- `dev/tests_debug/unit/test_rag_text.py`, `test_rag_chunking.py` — созданы;
+- запись «Этап 3» в `dev/migr_log.md`;
+- `requirements.txt`, `Kod.py`, `core/`, `storage/` — **не изменены**.
 
-## Перечитывание
-После гейта — перечитать `dev/migr_plan.md` (§4 «Этап 4», §6) и создать
-`dev/migr_plan_4.md`.
+## Гейт 3→4 (все пункты зелёные)
+
+| № | Проверка | Ожидаемо |
+|---|---|---|
+| 1 | `unit_runner.py test_rag_text` | все зелёные |
+| 2 | `unit_runner.py test_rag_chunking` | все зелёные |
+| 3 | обе стратегии дают чанки на корпусе | да |
+| 4 | метаданные заполнены у 100% чанков | да |
+| 5 | S1 и S2 дают **разное** число чанков | да |
+| 6 | ни один код-блок не разрезан | да |
+| 7 | L2/L3/L4/гейт | без регрессии (148+ OK / SMOKE OK / SCENARIO OK / 25 из 25) |
+| 8 | `git diff --stat requirements.txt` | пусто |
+| 9 | запись «Этап 3» + перечитывание `migr_plan.md` | ✅ |
+
+## Откат
+
+```bash
+git checkout -- rag/text.py rag/chunking.py
+rm -f rag/stopwords_ru_en.txt
+rm -f dev/tests_debug/unit/test_rag_text.py dev/tests_debug/unit/test_rag_chunking.py
+```
+
+## Что передаём дальше
+
+- **Этапу 4 (R2):** `Chunk.text` — вход для эмбеддера; `Chunk.sha1` — ключ кэша.
+- **Этапу 5 (R3):** `chunk_document` — источник чанков для индекса.
+- **Этапу 7 (R5):** обе стратегии — предмет сравнения на `queries.jsonl`.

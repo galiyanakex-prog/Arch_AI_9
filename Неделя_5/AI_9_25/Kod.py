@@ -130,6 +130,19 @@ parser.add_argument("--rag-path", action="append", default=None, metavar="ПУТ
                          "(можно повторять).")
 parser.add_argument("--rag-search", type=str, default=None, metavar="ЗАПРОС",
                     help="One-shot: поиск по индексу, вывести топ-k источников и выйти.")
+parser.add_argument("--rag-ask", type=str, default=None, metavar="ВОПРОС",
+                    help="One-shot: ответ с RAG (ответ + источники + цитаты) и выйти.")
+parser.add_argument("--rag-verify", action="store_true",
+                    help="One-shot: проверка источников/цитат на 10 вопросах и выйти.")
+parser.add_argument("--rag-threshold", type=float, default=None, metavar="F",
+                    help="Порог отсечения нерелевантных результатов (часть 2).")
+parser.add_argument("--rag-unknown", type=str, default=None, choices=("off", "on"),
+                    help="Режим «не знаю» при слабом контексте (часть 3).")
+parser.add_argument("--rag-reranker", type=str, default=None, choices=("off", "lexical"),
+                    help="Второй этап ранжирования: реранкер (часть 2).")
+parser.add_argument("--rag-rewrite", type=str, default=None,
+                    choices=("off", "llm", "heuristic"),
+                    help="Query rewrite перед поиском (часть 2).")
 parser.add_argument("--rag-eval", action="store_true",
                     help="One-shot: метрики качества retrieval на golden-датасете и выйти.")
 parser.add_argument("--rag-compare", action="store_true",
@@ -645,8 +658,25 @@ def _build_rag_config(cli_args):
     if cli_args.rag_top_k:
         patch["retrieval"] = dataclasses.replace(
             patch.get("retrieval", cfg.retrieval), final_k=cli_args.rag_top_k)
+    if cli_args.rag_threshold is not None:
+        patch["retrieval"] = dataclasses.replace(
+            patch.get("retrieval", cfg.retrieval), threshold=cli_args.rag_threshold)
     if cli_args.rag_grounding:
         patch["grounding"] = dataclasses.replace(cfg.grounding, mode=cli_args.rag_grounding)
+    if cli_args.rag_unknown:
+        patch["unknown"] = dataclasses.replace(
+            cfg.unknown, enabled=(cli_args.rag_unknown == "on"))
+    if cli_args.rag_reranker:
+        patch["rerank"] = dataclasses.replace(
+            cfg.rerank, enabled=(cli_args.rag_reranker == "lexical"))
+    if cli_args.rag_rewrite and cli_args.rag_rewrite != "off":
+        # Режим rewrite сохраняем в retrieval.multi_query (heuristic → выкл. LLM-вариант).
+        patch["retrieval"] = dataclasses.replace(
+            patch.get("retrieval", cfg.retrieval),
+            multi_query=(cli_args.rag_rewrite == "llm"))
+        # Флаг имеет приоритет над конфигом: фиксируем режим в rewrite-секции.
+        patch["rewrite"] = dataclasses.replace(
+            cfg.rewrite, enabled=True, mode=cli_args.rag_rewrite)
     if cli_args.rag_multi_query:
         patch["retrieval"] = dataclasses.replace(
             patch.get("retrieval", cfg.retrieval), multi_query=True)
@@ -677,6 +707,29 @@ def _print_rag_hits(hits, header: str):
               f" · score={hit.score:.4f}")
         text = " ".join((hit.text or "").split())
         print(f"     {text[:300]}{'…' if len(text) > 300 else ''}")
+    print()
+
+
+def _print_answer_sources(agent) -> None:
+    """Печать источников/цитат последнего ответа агента (часть 3, этап 10).
+
+    При активном RAG ответ обязан нести источники (source + section/chunk_id) и
+    цитаты. Без RAG/источников — ничего не печатаем (поведение прежнее).
+    """
+    sources = getattr(agent, "last_answer_sources", None) or []
+    if not sources:
+        return
+    verdict = getattr(agent, "last_answer_verdict", "unchecked")
+    print(f"[RAG] Источники ответа ({len(sources)}), опора: {verdict}")
+    for num, src in enumerate(sources, 1):
+        section = f" · {src.section}" if getattr(src, "section", "") else ""
+        print(f"  [{num}] {src.source}{section} · {src.chunk_id} · score={src.score}")
+    quotes = getattr(agent, "last_answer_quotes", None) or []
+    if quotes:
+        print(f"[RAG] Цитаты ({len(quotes)}):")
+        for num, quote in enumerate(quotes, 1):
+            snippet = " ".join((quote.text or "").split())[:200]
+            print(f"  [{num}] {quote.source} · {quote.chunk_id}\n      «{snippet}»")
     print()
 
 
@@ -717,8 +770,68 @@ def run_rag_search(cli_args) -> int:
     return 0
 
 
+def run_rag_ask(cli_args) -> int:
+    """One-shot: ответ с RAG (ответ + источники + цитаты) и выйти (тратит LLM)."""
+    cfg = _build_rag_config(cli_args)
+    service = _make_rag_service(cfg)
+    if not service.stats().get("n_chunks"):
+        print("[RAG] Индекс пуст — сначала: python Kod.py --rag-ingest", file=sys.stderr)
+        return 1
+    llm = _rag_llm_callable(cli_args)
+    ans = service.answer(cli_args.rag_ask, use_rag=True, k=cli_args.rag_top_k, llm=llm)
+    print(f"[RAG] Вопрос: {cli_args.rag_ask}")
+    print(f"[RAG] Ответ (опора: {ans.verdict}, {ans.latency_ms} мс):")
+    print(ans.text)
+    print()
+    if ans.sources:
+        print(f"[RAG] Источники ({len(ans.sources)}):")
+        for num, src in enumerate(ans.sources, 1):
+            section = f" · {src.section}" if src.section else ""
+            print(f"  [{num}] {src.source}{section} · {src.chunk_id} · score={src.score}")
+    if ans.quotes:
+        print(f"[RAG] Цитаты ({len(ans.quotes)}):")
+        for num, quote in enumerate(ans.quotes, 1):
+            snippet = " ".join(quote.text.split())[:200]
+            print(f"  [{num}] {quote.source} · {quote.chunk_id}\n      «{snippet}»")
+    return 0
+
+
+def run_rag_verify(cli_args) -> int:
+    """One-shot: проверка источников/цитат на 10 контрольных вопросах и выйти."""
+    from rag.verify import verify_answers, render_report
+    cfg = _build_rag_config(cli_args)
+    service = _make_rag_service(cfg)
+    if not service.stats().get("n_chunks"):
+        print("[RAG] Индекс пуст — сначала: python Kod.py --rag-ingest", file=sys.stderr)
+        return 1
+    dataset = os.path.join(BASE_DIR, "rag", "datasets", "queries.jsonl")
+    queries = [q for q in _load_queries(dataset) if q.get("id", "").startswith("c")][:10]
+    llm = _rag_llm_callable(cli_args)
+    result = verify_answers(cfg, queries, k=cfg.retrieval.final_k, llm=llm, limit=10)
+    print(render_report(result))
+    return 0
+
+
+def _load_queries(path):
+    import json
+    return [json.loads(l) for l in open(path, encoding="utf-8").read().splitlines() if l.strip()]
+
+
+def _rag_llm_callable(cli_args):
+    """LLM для one-shot ответа: MockClient в --mock, иначе RouterAI. None — заглушка."""
+    if getattr(cli_args, "mock", False):
+        from core.llm_client import MockClient
+        return MockClient().complete
+    api_key = os.getenv("API_KEY")
+    if not api_key or api_key == "test-key":
+        return None
+    from core.llm_client import RouterAIClient
+    return RouterAIClient().complete
+
+
 def run_rag_eval(cli_args) -> int:
     """One-shot: метрики retrieval на golden-датасете (LLM не тратит)."""
+
     cfg = _build_rag_config(cli_args)
     service = _make_rag_service(cfg)
     if not service.stats().get("n_chunks"):
@@ -891,8 +1004,68 @@ def handle_rag_command(agent: Agent, user_input: str):
         print()
         return
 
+    if sub == "ask":
+        # /rag ask <вопрос> — ответ с RAG (ответ + источники + цитаты).
+        if len(parts) < 3:
+            print("[RAG] Использование: /rag ask <вопрос>\n")
+            return
+        service = agent.rag_service or _ensure_rag_service(agent)
+        question = user_input.split(None, 2)[2]
+        llm = getattr(agent.llm, "complete", None)
+        ans = service.answer(question, use_rag=True, k=agent.rag_top_k, llm=llm)
+        print(f"[RAG] Ответ (опора: {ans.verdict}, {ans.latency_ms} мс):\n{ans.text}\n")
+        if ans.sources:
+            print(f"[RAG] Источники ({len(ans.sources)}):")
+            for num, src in enumerate(ans.sources, 1):
+                section = f" · {src.section}" if src.section else ""
+                print(f"  [{num}] {src.source}{section} · {src.chunk_id} · score={src.score}")
+        if ans.quotes:
+            print(f"[RAG] Цитаты ({len(ans.quotes)}):")
+            for num, quote in enumerate(ans.quotes, 1):
+                snippet = " ".join(quote.text.split())[:200]
+                print(f"  [{num}] {quote.source} · {quote.chunk_id}\n      «{snippet}»")
+        print()
+        return
+
+    if sub in ("sources", "quotes"):
+        # Источники/цитаты последнего ответа агента (заполняются в respond).
+        sources = getattr(agent, "last_answer_sources", None) or []
+        quotes = getattr(agent, "last_answer_quotes", None) or []
+        if sub == "sources":
+            if not sources:
+                print("[RAG] Источников нет (RAG выключен или пустой индекс).\n")
+                return
+            print(f"[RAG] Источники последнего ответа ({len(sources)}, "
+                  f"опора: {getattr(agent, 'last_answer_verdict', '—')}):")
+            for num, src in enumerate(sources, 1):
+                section = f" · {src.section}" if src.section else ""
+                print(f"  [{num}] {src.source}{section} · {src.chunk_id} · score={src.score}")
+        else:
+            if not quotes:
+                print("[RAG] Цитат нет (RAG выключен или пустой индекс).\n")
+                return
+            print(f"[RAG] Цитаты последнего ответа ({len(quotes)}):")
+            for num, quote in enumerate(quotes, 1):
+                snippet = " ".join(quote.text.split())[:200]
+                print(f"  [{num}] {quote.source} · {quote.chunk_id}\n      «{snippet}»")
+        print()
+        return
+
+    if sub == "verify":
+        # /rag verify — проверка источников/цитат на 10 контрольных вопросах.
+        from rag.verify import verify_answers, render_report
+        service = agent.rag_service or _ensure_rag_service(agent)
+        dataset = os.path.join(BASE_DIR, "rag", "datasets", "queries.jsonl")
+        queries = [q for q in _load_queries(dataset) if q.get("id", "").startswith("c")][:10]
+        llm = getattr(agent.llm, "complete", None)
+        result = verify_answers(service.cfg, queries, k=service.cfg.retrieval.final_k,
+                                llm=llm, limit=10)
+        print(render_report(result))
+        print()
+        return
+
     print("[RAG] Подкоманды: status | on | off | ingest [путь] | find <запрос> | "
-          "stats | eval | check\n")
+          "ask <вопрос> | sources | quotes | verify | stats | eval | check\n")
 
 
 # 9. Интервью-инициализация ------------------------------------------------------
@@ -1274,6 +1447,8 @@ def main():
     # (индексация раньше метрик), код выхода — худший из кодов прогонов.
     rag_runs = [(args.rag_ingest, run_rag_ingest),
                 (args.rag_search is not None, run_rag_search),
+                (args.rag_ask is not None, run_rag_ask),
+                (args.rag_verify, run_rag_verify),
                 (args.rag_eval, run_rag_eval),
                 (args.rag_compare, run_rag_compare)]
     if any(flag for flag, _ in rag_runs):
@@ -1527,6 +1702,10 @@ def main():
             append_token_log(exchange_tracker["n"], prompt_tokens, exchange_cost)
 
             print(f"Агент: {answer}\n")
+
+            # Источники/цитаты ответа (часть 3, этап 10): при активном RAG ответ
+            # обязан нести источники (source + section/chunk_id) и цитаты.
+            _print_answer_sources(agent)
 
         except EOFError:
             stop_scheduler(agent)

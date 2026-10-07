@@ -36,7 +36,7 @@ class _PerfectRetriever:
     def __init__(self, index):
         self.index = index
 
-    def search(self, query, k=5, mode=None, filters=None):
+    def search(self, query, k=5, mode=None, filters=None, threshold=None):
         chunk = self.index.chunks[0]
         return [Hit(chunk_id=chunk.chunk_id, doc_id=chunk.doc_id, source=chunk.source,
                     title=chunk.title, section=chunk.section, text=chunk.text, score=1.0)]

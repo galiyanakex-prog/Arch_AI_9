@@ -75,6 +75,43 @@ class Retriever:
             result.append(hit)
         return result
 
+    def _apply_threshold(self, hits, threshold):
+        """Отсечь кандидатов ниже порога (часть 2 Задание.txt).
+
+        Порог — по **косинусной близости** запроса и чанка (`scores["sim"]`,
+        0..1, абсолютная и сопоставимая между запросами). Если dense-сигнала нет
+        (режим `bm25`), нормируем RRF-скор на лучший кандидат. threshold <= 0 →
+        фильтр выключен. Значение близости дублируется в `scores["norm"]`.
+        """
+        if not hits or threshold <= 0:
+            return hits
+        top = max(hit.score for hit in hits) or 1.0
+        kept = []
+        for hit in hits:
+            sim = hit.scores.get("sim")
+            if sim is None:
+                sim = hit.score / top
+            hit.scores["norm"] = round(sim, 4)
+            if sim >= threshold:
+                kept.append(hit)
+        return kept
+
+    def _annotate_sim(self, hits, vector):
+        """Записать косинусную близость каждого хита к запросу в scores["sim"]."""
+        for hit in hits:
+            idx = self._index_of(hit)
+            if idx is None or not self.index.vectors:
+                continue
+            hit.scores["sim"] = round(self._cosine(vector, self.index.vectors[idx]), 4)
+        return hits
+
+    @staticmethod
+    def _cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a)) or 1.0
+        nb = math.sqrt(sum(x * x for x in b)) or 1.0
+        return dot / (na * nb)
+
     # ---------- фьюжн ----------
     def _rrf(self, rank_lists, rrf_k, weights=None):
         """Reciprocal Rank Fusion: score = Σ w_i / (rrf_k + rank).
@@ -136,7 +173,8 @@ class Retriever:
         return None
 
     # ---------- поиск ----------
-    def search(self, query: str, k: int = 5, mode: str = None, filters=None) -> list:
+    def search(self, query: str, k: int = 5, mode: str = None, filters=None,
+               threshold: float = None) -> list:
         if not query or not query.strip():
             raise ValueError("пустой запрос: нечего искать")
         mode = mode or self.cfg.retrieval.mode
@@ -144,6 +182,8 @@ class Retriever:
         rrf_k = self.cfg.retrieval.rrf_k
         lam = self.cfg.retrieval.mmr_lambda
         max_per_doc = self.cfg.retrieval.max_chunks_per_doc
+        if threshold is None:
+            threshold = self.cfg.retrieval.threshold
 
         if mode == "bm25":
             ranked = self.index.search_bm25(query, candidate_k)
@@ -154,6 +194,7 @@ class Retriever:
             vector = self.embedder.embed([query])[0]
             ranked = self.index.search_dense(vector, candidate_k)
             hits = [self._make_hit(i, s, {"dense_rank": r}) for r, (i, s) in enumerate(ranked)]
+            self._annotate_sim(hits, vector)
         elif mode == "hybrid":
             bm25 = self.index.search_bm25(query, candidate_k)
             if self.embedder is None:
@@ -167,6 +208,7 @@ class Retriever:
             hits = [self._make_hit(i, s, {
                 "bm25_rank": bm25_rank.get(i), "dense_rank": dense_rank.get(i),
                 "rrf": s}) for i, s in fused]
+            self._annotate_sim(hits, vector)
             hits = self.reranker.rerank(query, hits)
             for r, hit in enumerate(hits):
                 hit.scores["rerank"] = r
@@ -180,6 +222,7 @@ class Retriever:
 
         hits = self._apply_filters(hits, filters)
         hits = self._limit_per_doc(hits, max_per_doc)
+        hits = self._apply_threshold(hits, threshold)
         return hits[:k]
 
 

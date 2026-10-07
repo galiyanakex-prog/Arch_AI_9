@@ -29,6 +29,154 @@ def _build_index(cfg, strategy, embedder):
     return index
 
 
+# ---------------------------------------------------------------------------
+# Сравнение РЕЖИМОВ ОТВЕТА (часть 1, этап 7): no_rag | rag | rag_filter |
+# rag_filter_rewrite. Отличается от сравнения стратегий чанкинга: здесь метрики
+# про ОТВЕТ (попадание must_contain, наличие источников), а не про retrieval.
+# ---------------------------------------------------------------------------
+ANSWER_MODES = ("no_rag", "rag", "rag_filter", "rag_filter_rewrite")
+
+# Порог отсечения по умолчанию для режимов с фильтром (часть 2). Скор — косинус
+# запрос-чанк (см. Retriever._apply_threshold). 0.45 подобран замером: сохраняет
+# hit-rate@5 = 0.8824 (как без фильтра) и отсекает «хвост» нерелевантного
+# (см. migr_log.md, этап 8). Совпадает с rag/config.json → retrieval.threshold.
+DEFAULT_FILTER_THRESHOLD = 0.45
+
+
+def _mode_flags(mode: str) -> dict:
+    """Режим ответа → что делать: RAG, порог, rewrite."""
+    return {
+        "use_rag": mode != "no_rag",
+        "threshold": DEFAULT_FILTER_THRESHOLD if mode in
+                     ("rag_filter", "rag_filter_rewrite") else 0.0,
+        "rewrite": mode == "rag_filter_rewrite",
+    }
+
+
+def compare_answers(cfg, modes, queries, k: int = 5, llm=None,
+                    threshold: float = None, rewrite_mode: str = "heuristic"):
+    """Прогнать контрольные вопросы в разных режимах ответа (части 1–2).
+
+    Возвращает dict: {"rows": [...], "verdict": str, "divergences": [...]}.
+    llm — callable(messages)->str (DI). Колонки top-K до/после: `candidate_k`
+    (пул до фильтра) и `n_sources` (после фильтра).
+    """
+    from rag.rewrite import rewrite as _rewrite
+    from rag.service import RagService
+    query_list = queries if isinstance(queries, list) else load_queries(queries)
+    svc = RagService(cfg)
+    candidate_k = cfg.retrieval.candidate_k
+    rows = []
+    for mode in modes:
+        flags = _mode_flags(mode)
+        thr = threshold if threshold is not None else flags["threshold"]
+        for q in query_list:
+            query = q["query"]
+            used_query = query
+            if flags["rewrite"]:
+                used_query = _rewrite(query, llm=llm, mode=rewrite_mode)
+            hits = svc.search(used_query, k=k, threshold=thr) if flags["use_rag"] else []
+            ans = svc.answer(used_query, use_rag=flags["use_rag"], k=k,
+                             threshold=thr, llm=llm)
+            text = ans.text or ""
+            must = q.get("must_contain", [])
+            hit_must = sum(1 for m in must if m.lower() in text.lower())
+            rows.append({
+                "id": q.get("id", ""), "mode": mode,
+                "used_query": used_query,
+                "candidate_k": candidate_k if flags["use_rag"] else 0,
+                "has_sources": bool(ans.hits),
+                "n_sources": len(ans.hits),
+                "must_hit": hit_must, "must_total": len(must),
+                "answer_len": len(text),
+                "latency_ms": ans.latency_ms,
+            })
+    divergences = _answer_divergences(rows)
+    verdict = _answer_verdict(rows)
+    return {"rows": rows, "verdict": verdict, "divergences": divergences}
+
+
+def _answer_divergences(rows, limit=3):
+    """Вопросы, где режимы разошлись по наличию источников/попаданию must_contain."""
+    by_id = {}
+    for r in rows:
+        by_id.setdefault(r["id"], []).append(r)
+    out = []
+    for qid, group in by_id.items():
+        sig = {(r["has_sources"], r["must_hit"]) for r in group}
+        if len(sig) > 1:
+            out.append({"id": qid,
+                        "detail": "; ".join(
+                            f"{r['mode']}: ист.={r['n_sources']}, must={r['must_hit']}/{r['must_total']}"
+                            for r in group)})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _answer_verdict(rows) -> str:
+    modes = list(dict.fromkeys(r["mode"] for r in rows))
+    parts = []
+    for mode in modes:
+        group = [r for r in rows if r["mode"] == mode]
+        n = len(group)
+        src = sum(1 for r in group if r["has_sources"])
+        must = sum(r["must_hit"] for r in group)
+        total = sum(r["must_total"] for r in group)
+        lat = round(sum(r["latency_ms"] for r in group) / n, 1) if n else 0
+        parts.append(f"{mode}: источники {src}/{n}, must_contain {must}/{total}, "
+                     f"латентность ~{lat} мс")
+    rag_rows = [r for r in rows if r["mode"] != "no_rag"]
+    no_rag_rows = [r for r in rows if r["mode"] == "no_rag"]
+    if rag_rows and no_rag_rows:
+        rag_src = sum(1 for r in rag_rows if r["has_sources"])
+        no_src = sum(1 for r in no_rag_rows if r["has_sources"])
+        parts.append(f"RAG добавляет источники: {no_src} → {rag_src}.")
+    # Часть 2: режим с фильтром не хуже режима без фильтра (по попаданию must_contain).
+    def must_ratio(mode):
+        g = [r for r in rows if r["mode"] == mode]
+        total = sum(r["must_total"] for r in g)
+        return (sum(r["must_hit"] for r in g) / total) if total else 0.0
+    if any(r["mode"] == "rag_filter" for r in rows) and any(r["mode"] == "rag" for r in rows):
+        base, filt = must_ratio("rag"), must_ratio("rag_filter")
+        ok = filt >= base
+        parts.append(f"фильтр vs без фильтра (must_contain): {round(base, 3)} → "
+                     f"{round(filt, 3)} — {'✅ не хуже' if ok else '❌ хуже'}.")
+    return " · ".join(parts)
+
+
+def render_answer_report(result, k: int = 5) -> str:
+    """Markdown-отчёт сравнения режимов ответа (части 1–2)."""
+    lines = ["# Сравнение режимов ответа RAG (части 1–2)", ""]
+    lines.append(f"k = {k}  ·  вопросов = "
+                 f"{len({r['id'] for r in result['rows']})}")
+    lines.append("")
+    lines.append("## Таблица «вопрос × режим»")
+    lines.append("")
+    lines.append("| Вопрос | Режим | top-K до | top-K после | must_contain | Длина | Латентность, мс |")
+    lines.append("|---|---|---|---|---|---|---|")
+    for r in result["rows"]:
+        lines.append(
+            f"| {r['id']} | {r['mode']} | {r.get('candidate_k', 0)} | "
+            f"{r['n_sources']} | {r['must_hit']}/{r['must_total']} | "
+            f"{r['answer_len']} | {r['latency_ms']} |")
+    lines.append("")
+    lines.append("## Вердикт")
+    lines.append("")
+    lines.append(result["verdict"])
+    lines.append("")
+    lines.append("## Разбор расхождений")
+    lines.append("")
+    if result["divergences"]:
+        for div in result["divergences"]:
+            lines.append(f"- **{div['id']}** — {div['detail']}")
+    else:
+        lines.append("Расхождений между режимами не обнаружено.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+
 def compare(cfg, strategies, modes, queries, k: int = 5) -> CompareReport:
     """Прогнать все конфигурации и вернуть CompareReport."""
     query_list = queries if isinstance(queries, list) else load_queries(queries)
@@ -172,10 +320,16 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     cfg = RagConfig.default()
-    strategies = [s.strip() for s in args.strategies.split(",") if s.strip()]
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
-    report = compare(cfg, strategies, modes, args.queries, k=args.k)
-    text = render_report(report)
+
+    # Режимы ответа (части 1–2) — отдельный отчёт сравнения ответов.
+    if any(m in ANSWER_MODES for m in modes):
+        result = compare_answers(cfg, modes, args.queries, k=args.k)
+        text = render_answer_report(result, k=args.k)
+    else:
+        strategies = [s.strip() for s in args.strategies.split(",") if s.strip()]
+        report = compare(cfg, strategies, modes, args.queries, k=args.k)
+        text = render_report(report)
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
     Path(args.report).write_text(text, encoding="utf-8")
     print(text)

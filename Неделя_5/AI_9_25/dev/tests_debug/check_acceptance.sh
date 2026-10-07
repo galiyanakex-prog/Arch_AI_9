@@ -609,10 +609,158 @@ check "RAG: --rag-eval hit-rate@5 ≥ 0.80" bash -c "
   awk -v hr=\"\$HR\" 'BEGIN { exit (hr+0 >= 0.80) ? 0 : 1 }'
 "
 
+# --- Ревизия 7: RAG-модуль (части 1–4 Задание.txt, +10 проверок: 34..43) ----------
+
+# 34: новые модули Ревизии 7 импортируются (rewrite/sources/citations/verify + типы).
+check "RAG7: импорт новых модулей (rewrite/sources/citations/verify)" bash -c "
+  '$PY' - <<'PYEOF'
+import sys
+sys.path.insert(0, '$KOD')
+from rag.rewrite import rewrite
+from rag.sources import build_sources, render_sources
+from rag.citations import build_quotes, render_quotes
+from rag.verify import verify_answers, render_report
+from rag.types import Source, Quote
+print('ok')
+PYEOF
+"
+
+# 35: query rewrite — снятие шумовых оборотов + подтягивание терминов из истории.
+check "RAG7: rewrite убирает шум и подтягивает термины из истории" bash -c "
+  '$PY' - <<'PYEOF'
+import sys
+sys.path.insert(0, '$KOD')
+from rag.rewrite import rewrite
+clean = rewrite('пожалуйста, расскажи про бюджет токенов')
+assert 'пожалуйста' not in clean.lower(), clean
+assert 'бюджет' in clean.lower(), clean
+enriched = rewrite('а как это работает', history=['как устроен RAG-модуль проекта'])
+assert len(enriched.split()) > len('а как это работает'.split()), enriched
+print('ok')
+PYEOF
+"
+
+# 36: источники (дедуп по chunk_id, сорт по скору) и цитаты из чанков.
+check "RAG7: источники (дедуп/сорт) и цитаты из чанков" bash -c "
+  '$PY' - <<'PYEOF'
+import sys
+sys.path.insert(0, '$KOD')
+from rag.sources import build_sources
+from rag.citations import build_quotes
+from rag.types import Hit
+def hit(cid, score, text='бюджет токенов промпта'):
+    return Hit(chunk_id=cid, doc_id=cid.split('#')[0], source='a.py', title='',
+               section='S', text=text, score=score)
+src = build_sources([hit('d1#0', 0.5), hit('d2#0', 0.9), hit('d1#0', 0.5)])
+assert len(src) == 2 and src[0].chunk_id == 'd2#0', src
+quotes = build_quotes('Бюджет токенов промпта ограничен.', [hit('d1#0', 1.0)])
+assert quotes and quotes[0].chunk_id == 'd1#0', quotes
+print('ok')
+PYEOF
+"
+
+# 37: режим «не знаю» — при слабом контексте LLM НЕ вызывается, источников нет.
+check "RAG7: режим «не знаю» без вызова LLM" bash -c "
+  '$PY' - <<'PYEOF'
+import sys
+sys.path.insert(0, '$KOD')
+from rag.config import RagConfig
+from rag.corpus import discover
+from rag.embedding import HashingEmbedder
+from rag.index import RagIndex
+from rag.retrieval import Retriever
+from rag.service import RagService
+cfg = RagConfig.default()
+emb = HashingEmbedder(dim=256)
+svc = RagService(cfg)
+idx = RagIndex(cfg); idx.ingest(discover(None, cfg.corpus), cfg, emb)
+svc._index = idx; svc._loaded = True; svc._embedder = emb
+svc._retriever = Retriever(idx, cfg, emb)
+calls = {'n': 0}
+def llm(messages):
+    calls['n'] += 1
+    return 'ответ'
+ans = svc.answer('квантовые киты в борще', use_rag=True, threshold=0.99, llm=llm)
+assert ans.verdict == 'insufficient', ans.verdict
+assert ans.sources == () and ans.quotes == ()
+assert calls['n'] == 0, calls
+print('ok')
+PYEOF
+"
+
+# 38: --rag-ask (mock) → ответ + источники + цитаты (пропуск без индекса).
+check "RAG7: --rag-ask даёт ответ + источники + цитаты (mock)" bash -c "
+  if [ ! -f '$KOD/rag/index/meta.json' ]; then echo 'индекс отсутствует — пропуск'; exit 0; fi
+  OUT=\$(cd '$KOD' && API_KEY=test-key '$PY' Kod.py --rag-ask 'как считается бюджет токенов' --mock 2>&1)
+  echo \"\$OUT\" | grep -q '\[RAG\] Источники' || { echo 'нет источников'; exit 1; }
+  echo \"\$OUT\" | grep -q '\[RAG\] Цитаты' || { echo 'нет цитат'; exit 1; }
+"
+
+# 39: --rag-verify (mock) → источники/цитаты 10/10 на контрольных вопросах.
+check "RAG7: --rag-verify источники/цитаты 10/10 (mock)" bash -c "
+  if [ ! -f '$KOD/rag/index/meta.json' ]; then echo 'индекс отсутствует — пропуск'; exit 0; fi
+  OUT=\$(cd '$KOD' && API_KEY=test-key '$PY' Kod.py --rag-verify --mock 2>&1)
+  echo \"\$OUT\" | grep -q 'Источники: \*\*10/10\*\*' || { echo 'источники не 10/10'; exit 1; }
+  echo \"\$OUT\" | grep -q 'Цитаты: \*\*10/10\*\*' || { echo 'цитаты не 10/10'; exit 1; }
+"
+
+# 40: --rag-ask с высоким порогом → «не знаю» (insufficient) на уровне CLI.
+check "RAG7: --rag-ask с высоким порогом → «не знаю»" bash -c "
+  if [ ! -f '$KOD/rag/index/meta.json' ]; then echo 'индекс отсутствует — пропуск'; exit 0; fi
+  OUT=\$(cd '$KOD' && API_KEY=test-key '$PY' Kod.py --rag-ask 'квантовые киты в борще' --rag-threshold 0.99 --mock 2>&1)
+  echo \"\$OUT\" | grep -q 'insufficient' || { echo 'нет insufficient'; exit 1; }
+  echo \"\$OUT\" | grep -q 'нет ответа' || { echo 'нет сообщения «не знаю»'; exit 1; }
+"
+
+# 41: 4 режима ответа (часть 1: сравнение с/без RAG + фильтр + rewrite).
+check "RAG7: 4 режима ответа (no_rag/rag/rag_filter/rag_filter_rewrite)" bash -c "
+  '$PY' - <<'PYEOF'
+import sys
+sys.path.insert(0, '$KOD')
+from rag.compare import ANSWER_MODES
+assert ANSWER_MODES == ('no_rag', 'rag', 'rag_filter', 'rag_filter_rewrite'), ANSWER_MODES
+print('ok')
+PYEOF
+"
+
+# 42: WorkingMemory расширена (goal/terms/clarifications) и переживает перезапуск.
+check "RAG7: WorkingMemory round-trip (goal/terms/clarifications)" bash -c "
+  '$PY' - <<'PYEOF'
+import sys, tempfile, os
+sys.path.insert(0, '$KOD')
+from storage.store import Store
+from storage.db import ProfileRepository
+from memory.manager import MemoryManager, default_layers
+from memory.base import MemoryContext
+tmp = tempfile.mkdtemp(prefix='acc_wm_', dir='$TMP')
+store = Store(os.path.join(tmp, 'users'), profile_repo=ProfileRepository(os.path.join(tmp, 'p.db')))
+mem = MemoryManager(default_layers(store))
+ctx = MemoryContext('u', 't', 's')
+mem.remember('working', ctx, content={'goal': 'разобраться с бюджетом'}, source='system')
+mem.remember('working', ctx, content={'terms': {'RRF': 'reciprocal rank fusion'}}, source='system')
+mem.remember('working', ctx, content={'clarifications': 'именно про промпт'}, source='system')
+data = store.read_working('u', 't')
+assert data['goal'] == 'разобраться с бюджетом'
+assert data['terms']['RRF'] == 'reciprocal rank fusion'
+block = MemoryManager(default_layers(store)).layers['working'].as_prompt_block(ctx)
+assert 'Цель диалога:' in block and 'Термины:' in block and 'Уточнения:' in block
+print('ok')
+PYEOF
+"
+
+# 43: 2 длинных диалоговых сценария (10–15 сообщений) прогоняются с RAG (mock).
+check "RAG7: 2 длинных сценария (dialog_runner, mock)" bash -c "
+  if [ ! -f '$KOD/rag/index/meta.json' ]; then echo 'индекс отсутствует — пропуск'; exit 0; fi
+  test -s '$KOD/dev/tests_debug/scenario/scen_dialog_A.md' || { echo 'нет сценария A'; exit 1; }
+  test -s '$KOD/dev/tests_debug/scenario/scen_dialog_B.md' || { echo 'нет сценария B'; exit 1; }
+  cd '$KOD' && API_KEY=test-key '$PY' dev/tests_debug/dialog_runner.py --report '$TMP/dialog.md' 2>&1 | grep -q 'DIALOG OK'
+"
+
 # ИтОГ
 
 echo ""
 echo "ИТОГ: $PASS из $TOTAL зелёные (FAIL=$FAIL)"
+
 
 
 rm -rf "$TMP"

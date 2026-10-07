@@ -23,7 +23,17 @@ class WorkingMemory(MemoryLayer):
         for key, value in updates.items():
             if key == "current_state":
                 data[key] = value
-            elif key in ("refs", "decisions", "constraints", "facts", "open_questions"):
+            elif key == "goal":
+                # Цель диалога (часть 4 Задание.txt): скаляр, перезапись последним.
+                data[key] = value
+            elif key == "terms":
+                # Зафиксированные термины: merge словаря {термин: определение}.
+                if isinstance(value, dict):
+                    data.setdefault(key, {}).update(value)
+                else:
+                    data[key] = value
+            elif key in ("refs", "decisions", "constraints", "facts", "open_questions",
+                         "clarifications"):
                 # Списки: refs дополняются, остальные — append нового элемента.
                 if key == "refs":
                     data.setdefault(key, []).append(value)
@@ -39,9 +49,13 @@ class WorkingMemory(MemoryLayer):
     def as_prompt_block(self, ctx: MemoryContext) -> str:
         data = self.read(ctx)
         lines = [f"Задача: {data.get('description') or (ctx.task or '(без названия)')}"]
+        # Память задачи (часть 4 Задание.txt): цель диалога, уточнения, термины.
+        if data.get("goal"):
+            lines.append(f"Цель диалога: {data['goal']}")
         if data.get("lifecycle_summary"):
             lines.append(f"Резюме жизненного цикла: {data['lifecycle_summary']}")
         for field, label in (
+            ("clarifications", "Уточнения"),
             ("decisions", "Решения"),
             ("constraints", "Ограничения"),
             ("facts", "Факты"),
@@ -51,6 +65,10 @@ class WorkingMemory(MemoryLayer):
             if items:
                 joined = "; ".join(item.get("text", item) for item in items)
                 lines.append(f"{label}: {joined}")
+        terms = data.get("terms", {})
+        if terms:
+            joined = "; ".join(f"{k} — {v}" for k, v in terms.items())
+            lines.append(f"Термины: {joined}")
         # Инжект формализованного состояния задачи (День 13, arch_den_13 §2.7):
         # этап / шаг N/M / ожидаемое действие — из авторитетного task_state.json.
         # LLM видит стадию и «отождествляет себя с ней», а код не даёт выйти за

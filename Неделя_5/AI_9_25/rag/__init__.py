@@ -11,13 +11,13 @@
 """
 from rag.config import (DEFAULTS, DEFAULT_CONFIG_PATH, RagConfig, RagConfigError,
                         RagDependencyError, load_config)
-from rag.types import (Chunk, CompareReport, DocMeta, EvalReport, GroundingReport,
-                       Hit, IngestReport)
+from rag.types import (Answer, Chunk, CompareReport, DocMeta, EvalReport, GroundingReport,
+                       Hit, IngestReport, Quote, Source)
 from rag.service import RagService
 
 __all__ = [
     "RagConfig", "RagConfigError", "RagDependencyError", "load_config", "DEFAULTS",
     "DEFAULT_CONFIG_PATH",
     "Chunk", "DocMeta", "Hit", "IngestReport", "EvalReport", "CompareReport",
-    "GroundingReport", "RagService",
+    "GroundingReport", "Answer", "Source", "Quote", "RagService",
 ]

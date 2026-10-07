@@ -1,57 +1,81 @@
-# migr_plan_3.md — рабочий план этапа M3 (Пайплайн из MCP-инструментов)
+# migr_plan_3.md — Этап 3. Второй/третий серверы на VPS (И3)
 
-> Рабочий план-алгоритм одного этапа миграции `den_18` (Ревизия 4). Подчинён
-> плану-эталону `dev/migr_plan.md` §4 «Этап M3» (задание 2). Один этап = один план =
-> один гейт. Результат — в `dev/migr_log.md`.
-> `migr_plan.md` перечитан перед созданием файла (правило §1.1).
+> Рабочий план-алгоритм **одного этапа** на основе `dev/migr_plan.md` (Ревизия 5).
+> Контур: **И (инфраструктура VPS)**. Метка цели: **И3** (несколько MCP-серверов).
+> Коммиты — только за оператором.
 
----
+## Цель этапа
+На VPS поднимаются `scheduler :8010` и `pipeline :8020` — реальные HTTP-MCP-серверы,
+управляемые тем же `deploy_services.sh`. Это материальная база для «несколько
+MCP-серверов» (`Задание_d20.txt`) и для мультисерверного флоу (этап 8).
 
-## 0. Цель и границы
+## Предусловия (выполнено)
+- Этап 1 ✅: `time :8000` под `systemctl --user`, публичный доступ.
+- Этап 2 ✅: `dev/vps/` (mcp_vps.sh, deploy_services.sh, services.list, evidence/).
+- Серверы `scheduler_server.py`/`pipeline_server.py` уже в репозитории
+  (`integrations/mcp/`), порты 8010/8020, `allowed_hosts` с точным `IP:port`.
 
-**Цель** — пайплайн `search → summarize → saveToFile`: первый получает данные,
-второй обрабатывает, третий сохраняет; **автовыполнение цепочки** и **корректная
-передача данных** между инструментами.
-
-**Границы**: пайплайн поверх `ToolRegistry`/`ToolExecutor`; **не трогает
-`StateMachine`** (инструмент ≠ переход); данные между шагами передаются явно
-(результат N → аргумент N+1); SDK — только в `integrations/mcp/`.
-
----
-
-## 1. Артефакты
-
-| Файл | Назначение |
-|---|---|
-| `integrations/mcp/pipeline_server.py` | MCP-сервер: `search`, `summarize`, `saveToFile` (+ `readFile` для проверки) |
-| `core/tool_pipeline.py` | автоцепочка `PipelineStep`/`Pipeline` поверх `ToolExecutor` |
-| `integrations/mcp/config.py` | сервер `pipeline` в `DEFAULT_SERVERS` (env `PIPELINE_MCP_URL`) |
+## Границы этапа
+Не трогаем код серверов (только юниты + деплой). Не чиним D1 (этап 5). Не строим
+мультисерверный сценарий (этап 8) — только поднимаем серверы и доказываем
+`initialize`+`tools/list` снаружи.
 
 ---
 
-## 2. Шаги
+## Шаги
 
-1. `pipeline_server.py` на `MCPServer`: `search(query)` — детерминированный набор
-   фактов; `summarize(text)` — сжатие; `saveToFile(name, content)` — сохранение в
-   область пайплайна через фасад `Store`; `readFile(name)` — чтение для проверки.
-2. `core/tool_pipeline.py`: `PipelineStep(tool, arg_map, source_key)` +
-   `Pipeline([...])` + `run(pipeline, executor, ...)`: разрешение имён в каталоге,
-   передача результата шага N в аргумент шага N+1, аудит каждого вызова (существующий
-   `ToolExecutor`). `StateMachine` не трогается.
-3. `config.py` — сервер `pipeline` (`transport="http"`, env `PIPELINE_MCP_URL`).
-4. Детерминированная проверка (`FakeMCPTransport`): цепочка исполняется
-   автоматически; результат `search` попадает в `summarize`, результат `summarize` —
-   в `saveToFile`; файл сохранён; аудит — три записи `succeeded`.
-5. Живой прогон (не гейт): `/mcp pipeline <запрос>` (появится в M5) → три тула по
-   порядку, результат сохранён.
+### ШАГ 3.1 — юниты `mcp-scheduler-server.service`, `mcp-pipeline-server.service`
+`dev/vps/units/`, по образцу `mcp-time-server.service` (общий venv, `Restart=always`,
+`WantedBy=default.target`, env `SCHEDULER_PORT`/`PIPELINE_PORT`).
+
+### ШАГ 3.2 — `services.list` → три сервера
+`mcp-time-server:8000`, `mcp-scheduler-server:8010`, `mcp-pipeline-server:8020`.
+
+### ШАГ 3.3 — деплой
+```bash
+scp dev/vps/units/*.service dev/vps/services.list mcp-vps:/home/t/doc/AI_9/dev/vps/...
+ssh mcp-vps 'cd /home/t/doc/AI_9 && bash dev/vps/deploy_services.sh'
+```
+> ⚠ Найден и исправлен баг `deploy_services.sh`: `while read` терял последнюю
+> строку без `\n` → добавлено `|| [ -n "$name" ]`.
+
+### ШАГ 3.4 — `.env`: публичные адреса scheduler/pipeline
+```bash
+printf 'SCHEDULER_MCP_URL=http://91.188.212.77:8010/mcp\nPIPELINE_MCP_URL=http://91.188.212.77:8020/mcp\n' >> .env
+```
+> Дефолты `config.py` — `127.0.0.1` (для клиента **на** VPS). С локальной машины
+> нужен публичный адрес, иначе `connection refused` маскируется под
+> `Cancelled via cancel scope`.
+
+### ШАГ 3.5 — живой probe 8010/8020
+```bash
+./dev/vps/mcp_vps.sh probe 8010
+./dev/vps/mcp_vps.sh probe 8020
+```
+**Ожидаемо:** session-id + тулы (7 у scheduler, 4 у pipeline).
+
+### ШАГ 3.6 — регрессия + запись в журнал
+L2/L3/L4/гейт; запись «Этап 3» в `dev/migr_log.md`.
 
 ---
 
-## 3. Гейт M3→M4 (критерии)
+## Гейт 3→4
+| # | Проверка | Ожидаемо |
+|---|---|---|
+| 1 | `mcp_vps.sh status` | три сервиса `active`, порты 8000/8010/8020 |
+| 2 | `probe 8010` | session-id + 7 тулов планировщика |
+| 3 | `probe 8020` | session-id + 4 тула пайплайна |
+| 4 | `Kod.py --mcp-probe` (все живы) | все READY, 15 тулов, exit 0 |
+| 5 | регрессия L2/L3/L4/гейт | 122 OK · SMOKE OK · SCENARIO OK · 21/21 |
+| 6 | код продукта не изменён | `git diff` пуст по `Kod.py`, `core/`, `integrations/` |
 
-- [ ] цепочка исполняется автоматически;
-- [ ] данные корректно передаются между инструментами (fake + вживую);
-- [ ] файл сохранён; аудит — три записи `succeeded`;
-- [ ] `TaskStage` не меняется (инструмент ≠ переход);
-- [ ] L1 без регрессии; SDK только в `integrations/mcp/`;
-- [ ] L2/L3/L4/гейт без регрессии.
+## Риски этапа
+| Риск | Проявление | Действие |
+|---|---|---|
+| `while read` теряет последнюю строку | pipeline не деплоится | `|| [ -n "$name" ]` (исправлено) |
+| `127.0.0.1` в дефолтах | `Cancelled via cancel scope` | публичный адрес в `.env` |
+| Порт закрыт панелью | `timeout` | шаг 0.5 мастер-плана |
+
+## Перечитывание
+После гейта — перечитать `dev/migr_plan.md` (§4 «Этап 4», §6) и создать
+`dev/migr_plan_4.md`.

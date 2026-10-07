@@ -55,7 +55,7 @@ class FakeRag:
         self.search_calls = 0
         self.cfg = RagConfig.default()
 
-    def search(self, query, k=None, mode=None, filters=None):
+    def search(self, query, k=None, mode=None, filters=None, threshold=None):
         self.search_calls += 1
         if self.error:
             raise self.error
@@ -63,6 +63,17 @@ class FakeRag:
 
     def context_block(self, query="", k=None, budget=None, hits=None, mode=None):
         return render_rag(hits if hits is not None else self.hits)
+
+    def sources_for(self, hits):
+        from rag.sources import build_sources
+        return build_sources(hits or [])
+
+    def quotes_for(self, answer_text, hits):
+        from rag.citations import build_quotes
+        return build_quotes(answer_text or "", hits or [])
+
+    def verdict_for(self, answer_text, hits, mode=None):
+        return "partial" if hits else "unchecked"
 
     def stats(self):
         return {"n_chunks": len(self.hits), "n_docs": 1, "dim": 8, "model_id": "fake",
@@ -242,6 +253,27 @@ def test_agent_rag_error_does_not_break_answer(tmp_path):
     assert answer is not None
     assert agent.last_rag_hits == []
     assert agent.build_context("Что делать?").rag_block == ""
+
+
+# --- 5b. Источники/цитаты/вердикт ответа (часть 3, этап 10) -------------------------
+def test_agent_answer_meta_filled_with_rag(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.rag_service = FakeRag()
+    agent.rag_enabled = True
+    agent.deliver.add("rag")
+
+    agent.respond("Что делать?")
+    assert agent.last_answer_sources                 # источники заполнены
+    assert all(s.chunk_id for s in agent.last_answer_sources)
+    assert agent.last_answer_verdict in ("ok", "partial", "hallucination", "unchecked")
+
+
+def test_agent_answer_meta_empty_without_rag(tmp_path):
+    agent = make_agent(tmp_path)
+    agent.respond("Что делать?")
+    assert agent.last_answer_sources == []
+    assert agent.last_answer_quotes == []
+    assert agent.last_answer_verdict == "unchecked"
 
 
 # --- 6. Границы модулей (мастер-план §5) -------------------------------------------

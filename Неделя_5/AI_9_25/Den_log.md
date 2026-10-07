@@ -285,3 +285,20 @@
 [12:52:09] [Память] remember(working) → working_memory.json ['lifecycle_summary']
 [01:23:49] [RAG] ingest: +0 ~1 -0 =8, чанков 110 за 17.886s
 [05:46:39] [RAG] ingest: +0 ~0 -0 =9, чанков 110 за 0.029s
+[23:30:31] [Память] working ← ['lifecycle_summary'] → /home/u/Документы/111111/Обучение_Курсы/Основной_репозиторий/AI_9/users/w17/tasks/Основная_задача/working_memory.json
+[23:30:31] [Память] remember(working) → working_memory.json ['lifecycle_summary']
+[00:24:58] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[01:50:38] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[01:55:33] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[01:56:06] [RAG] grounding: verdict=partial coverage=0.468 ссылок=0 чисел вне=21
+[03:21:13] [RAG] ingest: +0 ~1 -0 =8, чанков 117 за 33.004s
+[03:23:10] [Память] working ← ['lifecycle_summary'] → /home/u/Документы/111111/Обучение_Курсы/Основной_репозиторий/AI_9/users/w17/tasks/Основная_задача/working_memory.json
+[03:23:10] [Память] remember(working) → working_memory.json ['lifecycle_summary']
+[03:26:38] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[09:10:23] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[09:14:47] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[10:16:45] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[09:11:50] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0
+[09:43:32] [RAG] grounding: verdict=hallucination coverage=0.476 ссылок=5 чисел вне=3
+[09:43:43] [RAG] grounding: verdict=hallucination coverage=0.421 ссылок=4 чисел вне=20
+[10:08:10] [RAG] grounding: verdict=partial coverage=0.25 ссылок=0 чисел вне=0

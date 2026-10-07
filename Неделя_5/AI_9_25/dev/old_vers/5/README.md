@@ -820,6 +820,14 @@ discovery `get_time`; 51 — реальный вызов `get_time`; 52 — LLM 
   `python -m pip`); `python` отсутствует в PATH (подпроцессы через `sys.executable`);
   квирк event loop (сессии `mcp` SDK привязаны к задаче initialize → `MCPGatewaySync`
   держит постоянную фоновую задачу; повторный `start()` идемпотентен);
+- **Миграция `den_20` → Ревизия 5** (день 20, журнал `dev/migr_log.md`, план-эталон
+  `dev/migr_plan.md` + рабочие планы `migr_plan_0..12.md`): **Ревизия 5** — этапы 0–12
+  (инфраструктурный контур VPS 0–3: доступ/привилегии, `time` под `systemd --user`,
+  скрипты отладки + живая база, `scheduler:8010` + `pipeline:8020`; пакет правок
+  дефектов продукта 4–12, метки D1–D7, M0/M7: порог probe + `enabled`-политика,
+  каталог в промте, мультисерверный флоу, `core/tool_routing.py` + `/mcp route`,
+  таймауты транспорта, пакет мелких исправлений, авторизация транспорта); история
+  Ревизии 4 сохранена в `dev/old_vers/5/`;
 - **API SDK 2.2.0 отличается от v1**: `FastMCP` → `MCPServer`,
   `StdioServerParameters(command: str, args: list)`, HTTP-вход —
   `streamable_http_client` (не `streamablehttp_client`), атрибут схемы тула —
@@ -845,9 +853,9 @@ discovery `get_time`; 51 — реальный вызов `get_time`; 52 — LLM 
 | `Задание_d17.txt` | Постановка куратора дня 17: подключить `get_time` и вызвать из приложения (не изменяется) |
 | `arch_den_16.md` | Целевая архитектура проекта (актуализирована под день 20) |
 | `dev/Проверка.md` | Чек-лист приёмки: 48 критериев дня 16 + строки 49–54 дня 17 |
-| `dev/migr_plan.md` + `migr_plan_0..6.md` | План-эталон и рабочие планы миграции (Ревизия 3, этапы M0–M6) |
-| `dev/migr_log.md` | Журнал миграции: записи этапов M0–M6 + «Итог миграции (Ревизия 3)» |
-| `dev/tests_debug/` | L2 (`unit_runner.py` + `unit/` — 11 модулей), L3 (`smoke.py`), L4 (`scenario.py` — 14 сценариев), гейт (`check_acceptance.sh` — 21 проверка), `scenario/scen_1.md`, `.tmp/` |
+| `dev/migr_plan.md` + `migr_plan_0..12.md` | План-эталон и рабочие планы миграции (Ревизия 5, этапы 0–12) |
+| `dev/migr_log.md` | Журнал миграции: записи этапов 0–12 + «Итог Ревизии 5» |
+| `dev/tests_debug/` | L2 (`unit_runner.py` + `unit/` — 17 модулей), L3 (`smoke.py`), L4 (`scenario.py` — 13 сценариев), гейт (`check_acceptance.sh` — 25 проверок), `scenario/scen_1.md`, `.tmp/` |
 | `dev/logs_reports/` | `stages/` (в т.ч. `m9_live_run.md` — живой прогон), `errors/`, `archive/` |
 
 ## Общее с Днями 6–11 (перенесённые уроки)
