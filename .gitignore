@@ -5,7 +5,7 @@ ENV
 # Python
 __pycache__/
 *.pyc
-
+.pytest_cache
 
 # Временные файлы
 check_models.py
@@ -28,3 +28,9 @@ rag/.tmp/
 
 # Окружение
 .venv
+.kodacli
+
+
+old_vers
+
+tests_debug
