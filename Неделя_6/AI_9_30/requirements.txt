@@ -1,0 +1,7 @@
+# Зависимости серверной части MCP (venv на VPS: /home/t/doc/mcp/ai9).
+# Зафиксированы по факту установки на Этапе 1 (migr_plan.md §4, И2б),
+# чтобы venv можно было воспроизвести: pip install -r requirements.txt
+# Версии соответствуют рабочему venv VPS (Python 3.13.5).
+mcp==2.2.0
+uvicorn>=0.54
+python-dotenv>=1.2

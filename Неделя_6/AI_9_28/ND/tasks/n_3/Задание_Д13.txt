@@ -1,0 +1,324 @@
+# этот файл не подлежит изменениям ни при каких обстотельствах
+AI Advent AI_9   🔥 День 13. Состояние задачи (Task State Machine)
+Руководитель проекта (куратор): Алексей Гладков (нужно следовать его указаниям).
+
+Задание:
+Реализуйте состояние задачи как конечный автомат:
+
+👉 этап задачи
+👉 текущий шаг
+👉 ожидаемое действие
+
+Пример состояний:
+
+👉 planning → execution → validation → done
+
+Проверьте:
+
+👉 паузу на любом этапе
+👉 продолжение без повторных объяснений
+
+Результат:
+
+Агент с формализованным состоянием задачи
+
+Формат отчёта:
+
+Код / Текст
+
+
+Дополнение (пояснение):
+Здесь хотят не просто агента, который «что-то делает», а агента, у которого в каждый момент явно записано:
+
+1. **На каком этапе** находится задача.
+2. **Какой конкретный шаг** сейчас выполняется.
+3. **Какое действие ожидается** дальше.
+
+Это и есть конечный автомат: система находится в одном состоянии и переходит в другое только по определённым правилам [1].
+
+## Что нужно реализовать
+
+Например, состояние задачи можно представить так:
+
+```python
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
+
+
+class TaskStage(str, Enum):
+    PLANNING = "planning"
+    EXECUTION = "execution"
+    VALIDATION = "validation"
+    PAUSED = "paused"
+    DONE = "done"
+    FAILED = "failed"
+
+
+@dataclass
+class TaskState:
+    task_id: str
+    objective: str
+
+    stage: TaskStage = TaskStage.PLANNING
+    current_step: int = 0
+    steps: list[str] = field(default_factory=list)
+
+    expected_action: str | None = None
+    results: list[Any] = field(default_factory=list)
+
+    previous_stage: TaskStage | None = None
+    error: str | None = None
+```
+
+Пример состояния:
+
+```python
+TaskState(
+    task_id="task-001",
+    objective="Найти прогноз погоды и сохранить его",
+    stage=TaskStage.EXECUTION,
+    current_step=1,
+    steps=[
+        "Получить прогноз погоды",
+        "Сохранить результат в файл"
+    ],
+    expected_action="Вызвать инструмент получения погоды"
+)
+```
+
+Значит, агент не должен каждый раз заново спрашивать LLM, что происходит. Он смотрит в `TaskState` и понимает: сейчас выполняется шаг 1, ожидается вызов инструмента погоды.
+
+## Как выглядят переходы
+
+Типичная схема:
+
+```text
+planning
+   ↓
+execution
+   ↓
+validation
+   ├── успех → done
+   └── ошибка → execution или failed
+```
+
+С паузой:
+
+```text
+planning ─────┐
+execution ────┼──→ paused ──→ продолжение предыдущего этапа
+validation ───┘
+```
+
+Важно, что `paused` — это не потеря состояния. Перед паузой нужно сохранить предыдущий этап:
+
+```python
+def pause_task(state: TaskState) -> TaskState:
+    if state.stage == TaskStage.PAUSED:
+        return state
+
+    state.previous_stage = state.stage
+    state.stage = TaskStage.PAUSED
+    state.expected_action = "Ожидать команды продолжения"
+    return state
+```
+
+Продолжение:
+
+```python
+def resume_task(state: TaskState) -> TaskState:
+    if state.stage != TaskStage.PAUSED:
+        return state
+
+    state.stage = state.previous_stage or TaskStage.EXECUTION
+    state.previous_stage = None
+    return state
+```
+
+Если агент был остановлен во время `execution` на шаге `2`, после `resume` он должен вернуться именно к `execution`, шагу `2`, а не начинать планирование заново.
+
+## Пример основного цикла
+
+```python
+def run_task(state: TaskState) -> TaskState:
+    if state.stage == TaskStage.PLANNING:
+        state.steps = [
+            "Получить данные",
+            "Обработать данные",
+            "Проверить результат"
+        ]
+        state.current_step = 0
+        state.expected_action = "Перейти к выполнению"
+        state.stage = TaskStage.EXECUTION
+
+    elif state.stage == TaskStage.EXECUTION:
+        if state.current_step >= len(state.steps):
+            state.stage = TaskStage.VALIDATION
+            state.expected_action = "Проверить результаты"
+            return state
+
+        step = state.steps[state.current_step]
+        state.expected_action = step
+
+        # Здесь агент вызывает нужный инструмент.
+        result = execute_step(step)
+        state.results.append(result)
+
+        state.current_step += 1
+
+    elif state.stage == TaskStage.VALIDATION:
+        is_valid = validate_results(state.results)
+
+        if is_valid:
+            state.stage = TaskStage.DONE
+            state.expected_action = None
+        else:
+            state.stage = TaskStage.FAILED
+            state.error = "Проверка результата не пройдена"
+
+    return state
+```
+
+Заглушки для примера:
+
+```python
+def execute_step(step: str) -> str:
+    return f"Результат шага: {step}"
+
+
+def validate_results(results: list) -> bool:
+    return len(results) > 0
+```
+
+## Что означает «продолжение без повторных объяснений»
+
+Предположим, пользователь запускает задачу:
+
+```text
+Найди три Python-фреймворка и сравни их.
+```
+
+Агент построил план и выполнил первый шаг. Затем пользователь нажал «пауза».
+
+В хранилище должно сохраниться примерно такое:
+
+```json
+{
+  "task_id": "task-001",
+  "objective": "Найди три Python-фреймворка и сравни их",
+  "stage": "paused",
+  "previous_stage": "execution",
+  "current_step": 1,
+  "steps": [
+    "Найти три фреймворка",
+    "Собрать информацию",
+    "Сравнить фреймворки"
+  ],
+  "expected_action": "Собрать информацию",
+  "results": [
+    "Найдены Django, Flask и FastAPI"
+  ]
+}
+```
+
+После команды:
+
+```text
+Продолжи
+```
+
+агент должен:
+
+1. Загрузить сохранённый `TaskState`.
+2. Восстановить этап `execution`.
+3. Продолжить с `current_step == 1`.
+4. Не строить план заново.
+5. Не просить пользователя ещё раз объяснить задачу.
+
+Для этого состояние можно сохранять в JSON:
+
+```python
+import json
+from dataclasses import asdict
+
+
+def save_state(state: TaskState, filename: str) -> None:
+    data = asdict(state)
+    data["stage"] = state.stage.value
+
+    if state.previous_stage:
+        data["previous_stage"] = state.previous_stage.value
+
+    with open(filename, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
+
+
+def load_state(filename: str) -> TaskState:
+    with open(filename, "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    data["stage"] = TaskStage(data["stage"])
+
+    if data["previous_stage"]:
+        data["previous_stage"] = TaskStage(data["previous_stage"])
+
+    return TaskState(**data)
+```
+
+## Что именно протестировать
+
+Минимальный набор тестов:
+
+```python
+def test_pause_and_resume():
+    state = TaskState(
+        task_id="1",
+        objective="Тестовая задача",
+        stage=TaskStage.EXECUTION,
+        current_step=2,
+        steps=["Шаг 1", "Шаг 2", "Шаг 3"],
+        expected_action="Выполнить шаг 3"
+    )
+
+    state = pause_task(state)
+
+    assert state.stage == TaskStage.PAUSED
+    assert state.previous_stage == TaskStage.EXECUTION
+    assert state.current_step == 2
+
+    state = resume_task(state)
+
+    assert state.stage == TaskStage.EXECUTION
+    assert state.current_step == 2
+    assert state.expected_action == "Выполнить шаг 3"
+```
+
+Также проверь:
+
+- паузу во время `planning`;
+- паузу во время `execution`;
+- паузу во время `validation`;
+- сохранение состояния на диск;
+- загрузку состояния после перезапуска программы;
+- повторную команду `resume`, когда задача уже не на паузе;
+- завершение задачи без повторного выполнения уже завершённых шагов.
+
+## Какой результат ожидается
+
+В итоге у тебя должен быть объект примерно такого вида:
+
+```text
+TaskState
+├── task_id
+├── objective
+├── stage
+├── current_step
+├── steps
+├── expected_action
+├── results
+├── previous_stage
+└── error
+```
+
+Главная идея задания: **LLM может принимать решения и составлять план, но отдельный Python-код должен управлять жизненным циклом задачи**. Это делает поведение агента предсказуемым: планирование, выполнение, проверка, пауза и продолжение происходят через явно заданные переходы, а не только через текстовую историю диалога [2][3].

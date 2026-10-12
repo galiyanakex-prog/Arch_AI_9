@@ -1,0 +1,23 @@
+# mcp-time-server.service — пользовательский юнит MCP-сервера времени (:8000).
+# Этап 1 (И2б): запуск/перезапуск агентом через `systemctl --user` (без sudo),
+# linger уже включён на Этапе 0. Деплой — dev/vps/deploy_services.sh.
+#
+# WorkingDirectory = корень AI_9, чтобы `-m integrations.mcp.time_server` нашёл пакет.
+# ExecStart = общий venv VPS (/home/t/doc/mcp/ai9) — единый venv для всех серверов.
+# WantedBy = default.target — корректно для user-юнита (не multi-user.target).
+
+[Unit]
+Description=MCP time server (AI_9, :8000)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/t/doc/AI_9
+ExecStart=/home/t/doc/mcp/ai9/bin/python -m integrations.mcp.time_server
+Restart=always
+RestartSec=3
+Environment=TIME_PORT=8000
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

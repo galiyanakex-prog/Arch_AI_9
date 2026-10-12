@@ -1,0 +1,2039 @@
+как настроить коннект termux -> vps -> хост (за nat), для настройки работы хоста (установка программ, редактирования проектов?
+причём сеть бывает не стабильной (периодически обрывается), нудно сделать так, чтобы коннект автоматически восстанавливался, а процессы запущенные в процессе работы не вылетали, а просто работали после автовосстановления становились опять доступны.
+
+Да. Оптимальная схема для вашей задачи — **Termux → VPS → reverse SSH-туннель → хост за NAT**, а рабочие процессы запускать внутри `tmux` или, ещё лучше, как системные `systemd`-сервисы. При обрыве телефона соединение восстановится, а процессы на хосте продолжат работать независимо от SSH-сеанса.
+
+Схема:
+
+```text
+Termux ──SSH──> VPS <──reverse SSH── Хост за NAT
+                         ^
+                         |
+              постоянный исходящий туннель
+```
+
+Хост за NAT сам подключается к VPS, поэтому проброс портов на роутере не нужен.
+
+## 1. Подготовьте VPS
+
+На VPS создайте отдельного пользователя для туннеля:
+
+```bash
+sudo adduser tunnel
+sudo mkdir -p /home/tunnel/.ssh
+sudo chmod 700 /home/tunnel/.ssh
+sudo chown -R tunnel:tunnel /home/tunnel/.ssh
+```
+
+На хосте сгенерируйте отдельный SSH-ключ:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/vps_tunnel
+```
+
+Скопируйте публичный ключ на VPS:
+
+```bash
+ssh-copy-id -i ~/.ssh/vps_tunnel.pub tunnel@VPS_IP
+```
+
+Если `ssh-copy-id` недоступен, добавьте содержимое файла:
+
+```bash
+cat ~/.ssh/vps_tunnel.pub
+```
+
+в файл на VPS:
+
+```text
+/home/tunnel/.ssh/authorized_keys
+```
+
+Установите права:
+
+```bash
+sudo chmod 600 /home/tunnel/.ssh/authorized_keys
+sudo chown tunnel:tunnel /home/tunnel/.ssh/authorized_keys
+```
+
+## 2. Создайте reverse-туннель с хоста
+
+На хосте выполните:
+
+```bash
+ssh -NT \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -R 22022:localhost:22 \
+  tunnel@VPS_IP
+```
+
+Здесь:
+
+```text
+-R 22022:localhost:22
+```
+
+означает: порт `22022` на VPS направляется на SSH-порт хоста за NAT.
+
+Проверьте подключение с VPS:
+
+```bash
+ssh -p 22022 user@127.0.0.1
+```
+
+Если вход выполнен на хост за NAT — туннель работает.
+
+Параметры `ServerAliveInterval` и `ServerAliveCountMax` позволяют быстрее обнаружить «мертвое» соединение, а `tmux` сохраняет терминальные процессы после обрыва SSH [1][2][6].
+
+## 3. Ограничьте ключ на VPS
+
+В `authorized_keys` пользователя `tunnel` желательно использовать ограниченный ключ:
+
+```text
+restrict,port-forwarding,permitlisten="127.0.0.1:22022" ssh-ed25519 AAAA...
+```
+
+Для совместимости со старыми версиями OpenSSH можно использовать более явную форму:
+
+```text
+no-agent-forwarding,no-X11-forwarding,no-pty,permitopen="localhost:22" ssh-ed25519 AAAA...
+```
+
+Не разрешайте пользователю `tunnel` входить по паролю:
+
+```bash
+sudo passwd -l tunnel
+```
+
+В `/etc/ssh/sshd_config` на VPS:
+
+```text
+PasswordAuthentication no
+PubkeyAuthentication yes
+AllowUsers tunnel ваш_пользователь
+```
+
+После изменения:
+
+```bash
+sudo systemctl reload ssh
+```
+
+Если на VPS этим пользователем нужен только reverse-туннель, его можно дополнительно ограничить через отдельный `Match User tunnel`.
+
+## 4. Автоматическое восстановление на хосте
+
+Самый надёжный вариант — `autossh` плюс `systemd`.
+
+Установите `autossh`.
+
+Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install autossh
+```
+
+Создайте сервис:
+
+```bash
+sudo nano /etc/systemd/system/reverse-ssh.service
+```
+
+Содержимое:
+
+```ini
+[Unit]
+Description=Persistent reverse SSH tunnel to VPS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=YOUR_USER
+Environment="AUTOSSH_GATETIME=0"
+ExecStart=/usr/bin/autossh -M 0 -NT \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -R 22022:localhost:22 \
+  tunnel@VPS_IP
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Замените:
+
+```text
+YOUR_USER
+VPS_IP
+```
+
+Проверьте путь к `autossh`:
+
+```bash
+which autossh
+```
+
+Затем активируйте сервис:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now reverse-ssh.service
+```
+
+Проверка:
+
+```bash
+systemctl status reverse-ssh.service
+journalctl -u reverse-ssh.service -f
+```
+
+После потери сети `autossh` перезапустит SSH-подключение. Если хост получает интернет через Wi-Fi или мобильный роутер, стоит также включить автоматическое подключение сети средствами NetworkManager или systemd-networkd.
+
+## 5. Подключение с Termux
+
+В Termux установите OpenSSH:
+
+```bash
+pkg update
+pkg install openssh tmux
+```
+
+Сгенерируйте ключ:
+
+```bash
+ssh-keygen -t ed25519
+```
+
+Добавьте публичный ключ на VPS:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+На VPS добавьте его в:
+
+```text
+/home/ВАШ_VPS_ПОЛЬЗОВАТЕЛЬ/.ssh/authorized_keys
+```
+
+Подключайтесь к хосту через VPS:
+
+```bash
+ssh -J ваш_пользователь@VPS_IP \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -p 22022 user@127.0.0.1
+```
+
+Более удобный вариант — записать это в `~/.ssh/config` Termux:
+
+```sshconfig
+Host vps
+    HostName VPS_IP
+    User ваш_пользователь
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
+
+Host home-host
+    HostName 127.0.0.1
+    Port 22022
+    User user
+    ProxyJump vps
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
+```
+
+После этого подключение выполняется командой:
+
+```bash
+ssh home-host
+```
+
+`ProxyJump` использует VPS как промежуточный SSH-сервер, а `22022` — порт обратного туннеля на VPS.
+
+## 6. Сохранение рабочих терминалов
+
+На хосте после подключения:
+
+```bash
+tmux new -s work
+```
+
+Работайте внутри этого сеанса. Чтобы выйти, не завершив процессы:
+
+```text
+Ctrl-b d
+```
+
+После повторного подключения:
+
+```bash
+tmux attach -t work
+```
+
+Проверить существующие сеансы:
+
+```bash
+tmux ls
+```
+
+Например:
+
+```bash
+ssh home-host
+tmux attach -t work
+```
+
+Важно: `tmux` переживает обрыв SSH, но не обязательно переживает перезагрузку самого хоста; для долгоживущих задач лучше использовать `systemd` [2][3].
+
+## 7. Долгие процессы лучше запускать через systemd
+
+Для приложения создайте сервис, например:
+
+```ini
+[Unit]
+Description=My project
+After=network.target
+
+[Service]
+User=user
+WorkingDirectory=/home/user/project
+ExecStart=/usr/bin/python3 /home/user/project/app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Сохраните как:
+
+```text
+/etc/systemd/system/my-project.service
+```
+
+Активируйте:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now my-project.service
+```
+
+Проверка:
+
+```bash
+systemctl status my-project.service
+journalctl -u my-project.service -f
+```
+
+Так приложение будет запускаться после перезагрузки и автоматически перезапускаться при падении.
+
+## 8. Редактирование проектов
+
+Для работы из Termux можно использовать SSHFS, но для нестабильной сети лучше редактировать файлы через SSH-клиент или синхронизацию Git.
+
+Простой вариант:
+
+```bash
+git clone git@github.com:USER/PROJECT.git
+```
+
+Изменения:
+
+```bash
+git add .
+git commit -m "update"
+git push
+```
+
+На хосте:
+
+```bash
+git pull
+```
+
+Если нужно запускать локальный веб-сервис хоста на телефоне, например порт `3000`, добавьте локальный проброс:
+
+```bash
+ssh -L 3000:localhost:3000 home-host
+```
+
+После этого на телефоне откройте:
+
+```text
+http://127.0.0.1:3000
+```
+
+## Рекомендуемая итоговая конфигурация
+
+- Хост за NAT: `autossh` + `systemd` + reverse-туннель `-R 22022:localhost:22`.
+- VPS: отдельный пользователь `tunnel`, вход только по ключу.
+- Termux: SSH-ключ и `ProxyJump`.
+- Командные сессии: `tmux`.
+- Серверы, базы и приложения: `systemd`.
+- Keepalive: `ServerAliveInterval=20`, `ServerAliveCountMax=3`.
+- Android: отключить оптимизацию батареи для Termux и разрешить ему работу в фоне, иначе Android может завершить процесс даже при правильно настроенном SSH [4][6].
+
+Ключевой момент: **автоматически восстанавливать нужно именно reverse-туннель, а не обычную SSH-сессию**. Тогда хост продолжает работать сам по себе, а после восстановления туннеля Termux снова получает к нему доступ.
+
+цитаты:
+[1] Скрипт-реаниматор: автоматическое восстановление упавших SSH ... https://habr.com/ru/articles/927234/
+[2] Сеансы tmux - Сохраняйте вашу SSH работу стабильной https://alexhost.com/ru/faq/why-ssh-users-still-use-tmux-sessions-panes-and-surviving-disconnects/
+[3] Устойчив ли ssh к разрывам GPRS-соединения? - Linux.org.ru https://www.linux.org.ru/forum/admin/8015988
+[4] Безопасный удалённый доступ к Termux: SSH‑ключи, управление ... https://rybinsklab.ru/termux/post.php?slug=bezopasnyy-udalennyy-dostup-k-termux--ssh-klyuchi-upravlenie-sessiyami-i-2fa-moduli-0408
+[5] termux.dev · en · docsTermux Docs https://termux.dev/en/docs/
+[6] SSH-туннель на Android: настройка, приложения и решение ... https://your-android.vercel.app/articles/s/ss/ssh-tunnel-android.html
+[7] Использование терминальных эмуляторов и tmux в Termux для ... https://rybinsklab.ru/termux/post.php?slug=ispolzovanie-terminalnyh-emulyatorov-i-tmux-v-termux-dlya-raspredelennogo-pentestinga--sessii-udalennye-tunneli-i-sovmestnaya-rabota-0404
+[8] Catalyst-42/WebTermux: Руководство по установке web ... https://github.com/Catalyst-42/WebTermux
+[9] Termux шаг за шагом (Часть 1) https://habr.com/ru/articles/444950/
+[10] Управление сервером со смартфона - Хабр https://habr.com/ru/companies/ruvds/articles/824352/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Как настроить автозапуск туннеля через systemd
+
+Ниже настройка для вашего случая: **хост за NAT автоматически устанавливает reverse SSH-туннель на VPS**, а при обрыве сети `systemd` запускает его заново.
+
+## 1. Установите autossh
+
+На хосте за NAT:
+
+```bash
+sudo apt update
+sudo apt install autossh
+```
+
+Проверьте расположение программы:
+
+```bash
+command -v autossh
+```
+
+Обычно результат:
+
+```text
+/usr/bin/autossh
+```
+
+## 2. Проверьте SSH вручную
+
+Сначала убедитесь, что хост может подключаться к VPS без запроса пароля:
+
+```bash
+ssh tunnel@VPS_IP
+```
+
+Если используется отдельный ключ:
+
+```bash
+ssh -i /home/USER/.ssh/vps_tunnel tunnel@VPS_IP
+```
+
+Проверьте, что ключ имеет правильные права:
+
+```bash
+chmod 600 /home/USER/.ssh/vps_tunnel
+```
+
+Вручную проверьте reverse-туннель:
+
+```bash
+ssh -i /home/USER/.ssh/vps_tunnel -NT \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -R 22022:localhost:22 \
+  tunnel@VPS_IP
+```
+
+Не закрывая эту команду, на VPS выполните:
+
+```bash
+ssh -p 22022 user@127.0.0.1
+```
+
+Если вы попали на хост за NAT, ручная настройка работает.
+
+## 3. Создайте systemd-сервис
+
+На хосте создайте файл:
+
+```bash
+sudo nano /etc/systemd/system/reverse-ssh.service
+```
+
+Вставьте:
+
+```ini
+[Unit]
+Description=Persistent reverse SSH tunnel to VPS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=USER
+Environment=AUTOSSH_GATETIME=0
+
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+  -i /home/USER/.ssh/vps_tunnel \
+  -o BatchMode=yes \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -R 22022:localhost:22 \
+  tunnel@VPS_IP
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Замените:
+
+```text
+USER
+VPS_IP
+```
+
+Например:
+
+```ini
+User=alex
+```
+
+и:
+
+```text
+/home/alex/.ssh/vps_tunnel
+```
+
+Для reverse-туннеля используется параметр `-R 22022:localhost:22`: порт `22022` на VPS направляется на SSH-порт хоста за NAT. Параметры `Restart=always` и `RestartSec=10` позволяют перезапускать туннель после ошибки или потери соединения [2][8].
+
+## 4. Включите автозапуск
+
+После создания файла выполните:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now reverse-ssh.service
+```
+
+Здесь:
+
+- `daemon-reload` перечитывает unit-файлы;
+- `enable` добавляет сервис в автозагрузку;
+- `--now` запускает его немедленно.
+
+Проверка:
+
+```bash
+systemctl status reverse-ssh.service
+```
+
+Ожидаемый статус:
+
+```text
+Active: active (running)
+```
+
+Проверить, включён ли автозапуск:
+
+```bash
+systemctl is-enabled reverse-ssh.service
+```
+
+Результат должен быть:
+
+```text
+enabled
+```
+
+## 5. Посмотрите логи
+
+Для просмотра текущих сообщений:
+
+```bash
+journalctl -u reverse-ssh.service
+```
+
+Для просмотра в реальном времени:
+
+```bash
+journalctl -u reverse-ssh.service -f
+```
+
+Полезно также проверить последние ошибки:
+
+```bash
+systemctl --no-pager --full status reverse-ssh.service
+```
+
+Если подключение не устанавливается, временно уберите `-o BatchMode=yes` из сервиса и запустите SSH вручную — так будет видно, запрашивается ли пароль или подтверждение ключа.
+
+## 6. Проверьте с VPS
+
+На VPS выполните:
+
+```bash
+ss -tlnp | grep 22022
+```
+
+Затем:
+
+```bash
+ssh -p 22022 user@127.0.0.1
+```
+
+Если порт слушается только на `127.0.0.1`, это нормально и безопаснее: доступ к хосту идёт через SSH-сеанс на VPS, а порт не опубликован во внешний интернет.
+
+## 7. Рекомендуемый SSH-конфиг
+
+Чтобы не хранить длинную команду в systemd-файле, можно создать на хосте:
+
+```bash
+nano /home/USER/.ssh/config
+```
+
+Содержимое:
+
+```sshconfig
+Host vps-tunnel
+    HostName VPS_IP
+    User tunnel
+    IdentityFile /home/USER/.ssh/vps_tunnel
+    BatchMode yes
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    ExitOnForwardFailure yes
+    StrictHostKeyChecking accept-new
+```
+
+Права:
+
+```bash
+chmod 600 /home/USER/.ssh/config
+```
+
+Тогда `ExecStart` можно сократить:
+
+```ini
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+  -R 22022:localhost:22 \
+  vps-tunnel
+```
+
+## 8. Если туннель не запускается
+
+Проверьте пользователя и ключ:
+
+```bash
+sudo -u USER ssh \
+  -i /home/USER/.ssh/vps_tunnel \
+  tunnel@VPS_IP
+```
+
+Проверьте путь к `autossh`:
+
+```bash
+command -v autossh
+```
+
+Проверьте синтаксис SSH:
+
+```bash
+ssh -vvv \
+  -i /home/USER/.ssh/vps_tunnel \
+  -N -T \
+  -R 22022:localhost:22 \
+  tunnel@VPS_IP
+```
+
+Проверьте права:
+
+```bash
+chmod 700 /home/USER/.ssh
+chmod 600 /home/USER/.ssh/vps_tunnel
+```
+
+После изменения сервиса:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart reverse-ssh.service
+```
+
+## Итоговая проверка
+
+```bash
+systemctl is-enabled reverse-ssh.service
+systemctl is-active reverse-ssh.service
+ssh -p 22022 user@127.0.0.1
+```
+
+После перезагрузки хоста проверить:
+
+```bash
+systemctl status reverse-ssh.service
+```
+
+Для долгих процессов на самом хосте используйте `systemd`, а для интерактивной работы — `tmux`. Обрыв SSH-соединения тогда не остановит уже запущенные процессы.
+
+Цитаты:
+[1] Туннели для IoT — устройства к облаку без IP — Блог fxTunnel https://fxtun.ru/blog/iot-tunnel-devices-cloud/
+[2] autossh: постоянный SSH-туннель, переподключение и systemd https://tunnelhunt.ru/blog/autossh-persistent-tunnels/
+[3] WireGuard: не работает после перезагрузки — причины и решение https://maatrix.io/blog/wireguard-ne-rabotaet-posle-perezagruzki-prichiny-i-reshenie/
+[4] Как настроить Split‑Tunneling на промежуточном сервере - Хабр https://habr.com/ru/articles/1026328/
+[5] Как правильно настроить Split‑Tunneling на промежуточном ... https://habr.com/ru/amp/publications/1026328/
+[6] Публикуем сайт с домашнего компьютера: Cloudflare Tunnel без ... https://bigmike.help/ru/devops/002/
+[7] Как настроить VPN на Linux — sing-box и systemd | Glush VPN https://glush.org/instrukcii/nastroyka-linux
+[8] Перенаправление портов SSH: как настроить и использовать https://arenda-server.cloud/blog/perenapravlenie-portov-ssh-kak-nastroit-i-ispolzovat/
+[9] DNSTT. DNS туннель для обхода блокировок / Хабр https://habr.com/ru/articles/757420/
+[10] VPN для Linux на Reality: sing-box и Xray на Ubuntu и ... - Visavio https://visavio.net/blog/vpn-linux-singbox
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Как настроить беспарольный вход по ключам
+
+Для вашего reverse SSH-туннеля нужно настроить ключ **на хосте за NAT → VPS**. После этого `systemd` сможет подключаться к VPS без запроса пароля.
+
+## 1. Создайте ключ на хосте
+
+На хосте за NAT выполните от имени пользователя, под которым работает сервис:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/vps_tunnel
+```
+
+На все вопросы можно нажать Enter:
+
+```text
+Enter passphrase:      # оставить пустым
+Enter same passphrase: # оставить пустым
+```
+
+Будут созданы файлы:
+
+```text
+~/.ssh/vps_tunnel       # закрытый ключ, никому не показывать
+~/.ssh/vps_tunnel.pub   # открытый ключ
+```
+
+Права:
+
+```bash
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/vps_tunnel
+chmod 644 ~/.ssh/vps_tunnel.pub
+```
+
+Для автоматического запуска через `systemd` закрытый ключ обычно оставляют без passphrase. Если использовать passphrase, потребуется отдельно настраивать `ssh-agent`.
+
+## 2. Скопируйте ключ на VPS
+
+Если на хосте есть `ssh-copy-id`:
+
+```bash
+ssh-copy-id -i ~/.ssh/vps_tunnel.pub tunnel@VPS_IP
+```
+
+Введите пароль пользователя `tunnel` на VPS один раз.
+
+Если `ssh-copy-id` отсутствует, выполните:
+
+```bash
+cat ~/.ssh/vps_tunnel.pub
+```
+
+Скопируйте всю строку, начинающуюся с:
+
+```text
+ssh-ed25519
+```
+
+Затем войдите на VPS обычным способом:
+
+```bash
+ssh tunnel@VPS_IP
+```
+
+На VPS выполните:
+
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/authorized_keys
+```
+
+Вставьте туда публичный ключ одной строкой. Затем:
+
+```bash
+chmod 600 ~/.ssh/authorized_keys
+```
+
+Публичный ключ должен находиться в `authorized_keys` пользователя, под которым выполняется SSH-подключение; такой способ настройки является стандартным для SSH-аутентификации по ключам [3].
+
+## 3. Проверьте вход без пароля
+
+На хосте за NAT:
+
+```bash
+ssh -i ~/.ssh/vps_tunnel tunnel@VPS_IP
+```
+
+Если вход выполнен без запроса пароля — ключ настроен.
+
+Для строгой проверки:
+
+```bash
+ssh -o BatchMode=yes \
+    -i ~/.ssh/vps_tunnel \
+    tunnel@VPS_IP \
+    'echo SSH_OK'
+```
+
+Ожидаемый результат:
+
+```text
+SSH_OK
+```
+
+Параметр `BatchMode=yes` запрещает SSH задавать интерактивные вопросы. Это важно для `systemd`: сервис не должен зависать в ожидании пароля.
+
+## 4. Настройте SSH-конфигурацию
+
+Создайте файл:
+
+```bash
+nano ~/.ssh/config
+```
+
+Добавьте:
+
+```sshconfig
+Host vps-tunnel
+    HostName VPS_IP
+    User tunnel
+    IdentityFile ~/.ssh/vps_tunnel
+    IdentitiesOnly yes
+    BatchMode yes
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    ExitOnForwardFailure yes
+    StrictHostKeyChecking accept-new
+```
+
+Замените `VPS_IP` на адрес VPS.
+
+Установите права:
+
+```bash
+chmod 600 ~/.ssh/config
+```
+
+Проверьте:
+
+```bash
+ssh vps-tunnel 'echo SSH_OK'
+```
+
+После этого в `systemd` можно указывать имя `vps-tunnel`, а не полный набор параметров.
+
+## 5. Используйте ключ в systemd
+
+Файл сервиса:
+
+```bash
+sudo nano /etc/systemd/system/reverse-ssh.service
+```
+
+Пример:
+
+```ini
+[Unit]
+Description=Persistent reverse SSH tunnel to VPS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Environment=AUTOSSH_GATETIME=0
+
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+  -R 22022:localhost:22 \
+  vps-tunnel
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Замените:
+
+```text
+YOUR_USER
+```
+
+на пользователя хоста, у которого находятся:
+
+```text
+/home/YOUR_USER/.ssh/vps_tunnel
+/home/YOUR_USER/.ssh/config
+```
+
+Если не используете `~/.ssh/config`, укажите ключ непосредственно:
+
+```ini
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+  -i /home/YOUR_USER/.ssh/vps_tunnel \
+  -o User=tunnel \
+  -o HostName=VPS_IP \
+  -o IdentitiesOnly=yes \
+  -o BatchMode=yes \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -R 22022:localhost:22
+```
+
+## 6. Запустите и проверьте сервис
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now reverse-ssh.service
+```
+
+Проверка:
+
+```bash
+systemctl status reverse-ssh.service
+```
+
+Логи:
+
+```bash
+journalctl -u reverse-ssh.service -f
+```
+
+С VPS проверьте доступ к хосту:
+
+```bash
+ssh -p 22022 user@127.0.0.1
+```
+
+## Если появляется запрос пароля
+
+Проверьте подключение от имени пользователя systemd:
+
+```bash
+sudo -u YOUR_USER ssh \
+  -o BatchMode=yes \
+  -i /home/YOUR_USER/.ssh/vps_tunnel \
+  tunnel@VPS_IP \
+  'echo SSH_OK'
+```
+
+Частые причины:
+
+```bash
+chmod 700 /home/YOUR_USER/.ssh
+chmod 600 /home/YOUR_USER/.ssh/vps_tunnel
+chmod 600 /home/YOUR_USER/.ssh/config
+```
+
+На VPS:
+
+```bash
+chmod 700 /home/tunnel/.ssh
+chmod 600 /home/tunnel/.ssh/authorized_keys
+chown -R tunnel:tunnel /home/tunnel/.ssh
+```
+
+Проверьте, что в `authorized_keys` ключ вставлен полностью, одной строкой, без переносов.
+
+Если ключ уже был создан с passphrase, проще создать отдельный ключ для `systemd` без passphrase:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/vps_tunnel_systemd
+```
+
+Не отключайте парольную авторизацию на VPS, пока не проверите вход по ключу в отдельной SSH-сессии. После успешной проверки можно отключить её в `/etc/ssh/sshd_config`:
+
+```text
+PasswordAuthentication no
+PubkeyAuthentication yes
+```
+
+Затем проверить конфигурацию и перечитать SSH-сервис:
+
+```bash
+sudo sshd -t
+sudo systemctl reload ssh
+```
+
+Цитаты:
+[1] Windows 11 книга безопасности — вход без пароля https://learn.microsoft.com/ru-ru/windows/security/book/identity-protection-passwordless-sign-in
+[2] Вход ключа безопасности FIDO2 в Windows - Microsoft Entra ID https://learn.microsoft.com/ru-ru/entra/identity/authentication/howto-authentication-passwordless-security-key-windows
+[3] Почему при аутентификации в Linux пароль хуже ключа https://habr.com/ru/companies/selectel/articles/916796/
+[4] Как перейти на вход без пароля с помощью Windows Hello ... https://robob.ru/articles/kak-pereyti-na-vhod-bez-parolya-s-pomoschyu-windows-hello-polnyy
+[5] Поддержка ключей доступа в Windows https://learn.microsoft.com/ru-ru/windows/security/identity-protection/passkeys/
+[6] Как настроить ключи доступа в Chrome https://support.google.com/chrome/answer/13168025?co=GENIE.Platform=Desktop&hl=ru
+[7] Вход с Passkey — документация Начало работы руководство ... https://cloud.ru/docs/console/ug/topics/guides__auth_passkey
+[8] Как войти в аккаунт, используя ключ доступа вместо пароля https://support.google.com/accounts/answer/13548313?hl=ru
+[9] Как настроить беспарольную авторизацию и как ею пользоваться https://t-j.ru/no-password/
+[10] Настройка SSH аутентификации по ключам в Windows https://winitpro.ru/index.php/2019/11/13/autentifikaciya-po-ssh-klyucham-v-windows/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Как привязать этот ключ к systemd туннелю
+
+Ключ привязывается к systemd через параметр `-i` в команде `ExecStart`. Например, если закрытый ключ находится в:
+
+```text
+/home/alex/.ssh/vps_tunnel
+```
+
+создайте сервис:
+
+```bash
+sudo nano /etc/systemd/system/reverse-ssh.service
+```
+
+Содержимое:
+
+```ini
+[Unit]
+Description=Persistent reverse SSH tunnel to VPS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=alex
+Environment=AUTOSSH_GATETIME=0
+
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+  -i /home/alex/.ssh/vps_tunnel \
+  -o IdentitiesOnly=yes \
+  -o BatchMode=yes \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -o ExitOnForwardFailure=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -R 22022:localhost:22 \
+  tunnel@VPS_IP
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Замените:
+
+```text
+alex
+VPS_IP
+tunnel
+```
+
+на свои значения.
+
+Параметр:
+
+```text
+-i /home/alex/.ssh/vps_tunnel
+```
+
+указывает systemd/autossh, какой приватный ключ использовать. Такой способ подключения ключа через `ExecStart` применяется в постоянных SSH-туннелях под systemd [1][4].
+
+## Проверьте права на ключ
+
+```bash
+sudo chown alex:alex /home/alex/.ssh/vps_tunnel
+sudo chmod 600 /home/alex/.ssh/vps_tunnel
+sudo chmod 700 /home/alex/.ssh
+```
+
+Проверьте вход именно от имени пользователя сервиса:
+
+```bash
+sudo -u alex ssh \
+  -i /home/alex/.ssh/vps_tunnel \
+  -o IdentitiesOnly=yes \
+  -o BatchMode=yes \
+  tunnel@VPS_IP 'echo SSH_OK'
+```
+
+Ожидаемый результат:
+
+```text
+SSH_OK
+```
+
+Если появляется:
+
+```text
+Permission denied (publickey)
+```
+
+значит публичный ключ ещё не добавлен на VPS в:
+
+```text
+/home/tunnel/.ssh/authorized_keys
+```
+
+## Запустите сервис
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now reverse-ssh.service
+```
+
+Проверьте состояние:
+
+```bash
+systemctl status reverse-ssh.service
+```
+
+Логи:
+
+```bash
+journalctl -u reverse-ssh.service -f
+```
+
+На VPS проверьте доступ через туннель:
+
+```bash
+ssh -p 22022 user@127.0.0.1
+```
+
+## Вариант через SSH-конфигурацию
+
+Вместо длинной команды можно описать ключ в `/home/alex/.ssh/config`:
+
+```sshconfig
+Host vps-tunnel
+    HostName VPS_IP
+    User tunnel
+    IdentityFile /home/alex/.ssh/vps_tunnel
+    IdentitiesOnly yes
+    BatchMode yes
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    ExitOnForwardFailure yes
+    StrictHostKeyChecking accept-new
+```
+
+Права:
+
+```bash
+sudo chown alex:alex /home/alex/.ssh/config
+sudo chmod 600 /home/alex/.ssh/config
+```
+
+Тогда `ExecStart` будет короче:
+
+```ini
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+  -R 22022:localhost:22 \
+  vps-tunnel
+```
+
+Но для первого запуска рекомендую использовать явный параметр `-i`, чтобы было очевидно, какой ключ применяется.
+
+Важно: ключ должен быть без passphrase, иначе systemd не сможет автоматически ввести её при загрузке системы. `BatchMode=yes` специально запрещает интерактивный запрос пароля и позволяет сервису сразу завершиться с ошибкой, если ключ настроен неправильно.
+
+Цитаты:
+[1] Permanent SSH tunnel with systemd - bitExpert AG https://blog.bitexpert.de/blog/permanent-ssh-tunnel-with-systemd
+[2] Рабочий стол за NAT: autossh, systemd и VNC https://habr.com/ru/amp/publications/1084574/
+[3] Рабочий стол за NAT: autossh, systemd и VNC / Хабр https://habr.com/ru/companies/cloud4y/articles/1084574/
+[4] SSH-туннели: настройка и примеры использования - FirstVDS https://firstvds.ru/technology/ssh-tunnels
+[5] SSH как корпоративный L3-туннель: когда классические ... https://habr.com/ru/articles/1036160/
+[6] Домашний сервер без белого IP: безопасная публикация ... - Хабр https://habr.com/ru/articles/1038422/
+[7] Руководство по SSH-туннелированию для безопасных соединений ... https://alexhost.com/ru/faq/ssh-tunnels-configuration-and-practical-use-cases/
+[8] SSH-туннель вместо белого IP: как получить доступ к домашнему ... https://habr.com/ru/articles/949544/
+[9] System and Service Credentials - Systemd https://systemd.io/CREDENTIALS/
+[10] Настройка Cloudflare Tunnel (Argo Tunnel) на VPS: безопасный ... https://valebyte.com/ru/guides/configuracion-de-cloudflare-tunnel-ar/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Как проверить статус и лог туннеля
+
+Для сервиса `reverse-ssh.service` используйте следующие команды.
+
+## Статус туннеля
+
+Краткая проверка:
+
+```bash
+systemctl is-active reverse-ssh.service
+```
+
+Результат:
+
+```text
+active
+```
+
+Проверка автозапуска:
+
+```bash
+systemctl is-enabled reverse-ssh.service
+```
+
+Ожидаемый результат:
+
+```text
+enabled
+```
+
+Подробный статус:
+
+```bash
+sudo systemctl status reverse-ssh.service
+```
+
+Полезный вариант без открытия интерактивного режима:
+
+```bash
+sudo systemctl --no-pager --full status reverse-ssh.service
+```
+
+В рабочем состоянии должно быть примерно:
+
+```text
+Active: active (running)
+```
+
+## Просмотр логов
+
+Показать все логи сервиса:
+
+```bash
+sudo journalctl -u reverse-ssh.service
+```
+
+Показать последние 100 строк:
+
+```bash
+sudo journalctl -u reverse-ssh.service -n 100
+```
+
+Следить за логом в реальном времени:
+
+```bash
+sudo journalctl -u reverse-ssh.service -f
+```
+
+Выйти из режима просмотра:
+
+```text
+Ctrl+C
+```
+
+Показать логи только с текущей загрузки системы:
+
+```bash
+sudo journalctl -u reverse-ssh.service -b
+```
+
+Показать логи за последние 30 минут:
+
+```bash
+sudo journalctl -u reverse-ssh.service --since "30 minutes ago"
+```
+
+Показать только ошибки:
+
+```bash
+sudo journalctl -u reverse-ssh.service -p err
+```
+
+Или ошибки за текущую загрузку:
+
+```bash
+sudo journalctl -u reverse-ssh.service -b -p err
+```
+
+Логи systemd-journal — основной способ диагностики сервисов, запущенных через systemd; команда `journalctl -u` фильтрует записи по конкретному unit-файлу.
+
+## Проверка порта на VPS
+
+На VPS проверьте, слушается ли reverse-порт:
+
+```bash
+sudo ss -tlnp | grep 22022
+```
+
+Возможный результат:
+
+```text
+LISTEN 0 128 127.0.0.1:22022 0.0.0.0:*
+```
+
+Затем с VPS попробуйте войти на хост за NAT:
+
+```bash
+ssh -p 22022 user@127.0.0.1
+```
+
+Если вход успешен, цепочка работает:
+
+```text
+Termux → VPS:22022 → хост за NAT
+```
+
+## Быстрая проверка одной командой
+
+На хосте:
+
+```bash
+systemctl is-active --quiet reverse-ssh.service \
+  && echo "Туннель запущен" \
+  || echo "Туннель не работает"
+```
+
+На VPS:
+
+```bash
+ssh -o ConnectTimeout=10 -p 22022 user@127.0.0.1 'hostname'
+```
+
+Эта команда должна вывести имя хоста за NAT.
+
+## Если сервис не работает
+
+Сначала посмотрите последние сообщения:
+
+```bash
+sudo journalctl -u reverse-ssh.service -n 50 --no-pager
+```
+
+Затем перезапустите:
+
+```bash
+sudo systemctl restart reverse-ssh.service
+```
+
+И снова проверьте:
+
+```bash
+sudo systemctl status reverse-ssh.service
+```
+
+Частые сообщения и причины:
+
+```text
+Permission denied (publickey)
+```
+
+Неверный ключ, пользователь или отсутствует публичный ключ в `authorized_keys`.
+
+```text
+Identity file ... not accessible
+```
+
+Неправильный путь к приватному ключу или недостаточные права.
+
+```text
+remote port forwarding failed for listen port 22022
+```
+
+Порт `22022` уже занят на VPS либо запрещено reverse-пробрасывание в конфигурации SSH-сервера.
+
+```text
+Connection timed out
+```
+
+VPS недоступен по сети, закрыт порт SSH или отсутствует интернет на хосте.
+
+```text
+bind: Address already in use
+```
+
+Другой процесс уже занял локальный или удалённый порт.
+
+## Проверка конфигурации без systemd
+
+Чтобы увидеть подробную SSH-ошибку, остановите сервис:
+
+```bash
+sudo systemctl stop reverse-ssh.service
+```
+
+Затем запустите подключение вручную от имени сервисного пользователя:
+
+```bash
+sudo -u USER ssh -vvv \
+  -i /home/USER/.ssh/vps_tunnel \
+  -o IdentitiesOnly=yes \
+  -N -T \
+  -R 22022:localhost:22 \
+  tunnel@VPS_IP
+```
+
+После диагностики снова включите сервис:
+
+```bash
+sudo systemctl start reverse-ssh.service
+```
+
+Не запускайте ручную команду одновременно с `systemd`, иначе порт `22022` может оказаться занят уже работающим туннелем.
+
+Цитаты:
+[1] Observability - Cloudflare Docs https://developers.cloudflare.com/tunnel/observability/
+[2] Best practices туннелирования в 2026 — гайд https://fxtun.ru/blog/tunneling-best-practices-2026/
+[3] API awg‑manager – awg-manager https://awgm.hoaxisr.ru/api/
+[4] NanoKVM — удалённый доступ + мониторинг с помощью Tuna https://habr.com/ru/companies/tuna/articles/994364/
+[5] WireGuard на Windows 11: импорт, автозапуск и диагностика https://wireguard-wiki.info/platform/windows-11/
+[6] WireGuard основное управление - automata.sale https://automata.sale/blog/hosting/wireguard-osnovnoe-upravlenie/
+[7] Обзор Континента TLS Сервер 2.2, системы для защищённого ... https://www.anti-malware.ru/reviews/kontinent-tls-vpn-22
+[8] IPSEC - Блог белорусского сисадмина https://kulmaks.by/category/networks/ipsec/
+[9] Инструменты – awg-manager https://awgm.hoaxisr.ru/guide/diagnostics/
+[10] Подробный гайд: Не работает туннель в VIPNet Client ... https://servermon.ru/blog/pomoshch-po-rabote-s-vipnet/podrobnyy-gayd-ne-rabotaet-tunnel-v-vipnet-client-diagnostika-i-ispravlenie.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Как проверить доступность туннеля с Termux
+
+Проверяйте туннель с Termux в три этапа: доступен ли VPS, отвечает ли reverse-порт и открывается ли сам хост за NAT.
+
+## 1. Установите утилиты
+
+```bash
+pkg update
+pkg install openssh netcat
+```
+
+Проверьте доступность VPS:
+
+```bash
+ping -c 3 VPS_IP
+```
+
+`ping` может быть запрещён на VPS, поэтому основной проверкой будет SSH и TCP-порт. Проверка конкретного порта через `nc` помогает отделить сетевую проблему от ошибки SSH-конфигурации [6].
+
+## 2. Проверьте SSH на VPS
+
+Если VPS слушает SSH на стандартном порту:
+
+```bash
+nc -zv -w 5 VPS_IP 22
+```
+
+Успешный результат будет похож на:
+
+```text
+Connection to VPS_IP 22 port [tcp/ssh] succeeded!
+```
+
+Затем проверьте обычный вход:
+
+```bash
+ssh vps-user@VPS_IP
+```
+
+Или, если используется ключ:
+
+```bash
+ssh -i ~/.ssh/id_ed25519 vps-user@VPS_IP
+```
+
+Если обычный вход на VPS не работает, reverse-туннель проверить не получится.
+
+## 3. Проверьте reverse-порт на VPS
+
+Допустим, в туннеле используется:
+
+```text
+-R 22022:localhost:22
+```
+
+Сначала проверьте порт:
+
+```bash
+nc -zv -w 5 VPS_IP 22022
+```
+
+Но если reverse-порт привязан к `127.0.0.1` на VPS, проверять его нужно уже после входа на VPS:
+
+```bash
+ssh vps-user@VPS_IP
+```
+
+На VPS:
+
+```bash
+ss -tln | grep 22022
+```
+
+Ожидаемый результат:
+
+```text
+LISTEN 0 128 127.0.0.1:22022 0.0.0.0:*
+```
+
+Затем на VPS:
+
+```bash
+ssh -p 22022 home-user@127.0.0.1
+```
+
+Если это подключение успешно, туннель между VPS и хостом за NAT работает.
+
+## 4. Подключитесь из Termux через VPS
+
+Прямой вариант:
+
+```bash
+ssh -J vps-user@VPS_IP \
+    -p 22022 \
+    home-user@127.0.0.1
+```
+
+Если для VPS нужен ключ:
+
+```bash
+ssh -i ~/.ssh/vps_key \
+    -J vps-user@VPS_IP \
+    -p 22022 \
+    home-user@127.0.0.1
+```
+
+Здесь:
+
+- первый SSH-сеанс подключается к VPS;
+- `-J` использует VPS как промежуточный сервер;
+- второй SSH-сеанс подключается к reverse-порту `22022`;
+- `home-user` — пользователь на хосте за NAT.
+
+## 5. Создайте удобный SSH-конфиг
+
+В Termux:
+
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/config
+```
+
+Добавьте:
+
+```sshconfig
+Host vps
+    HostName VPS_IP
+    User vps-user
+    IdentityFile ~/.ssh/vps_key
+    IdentitiesOnly yes
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+
+Host home-host
+    HostName 127.0.0.1
+    Port 22022
+    User home-user
+    ProxyJump vps
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
+```
+
+Права:
+
+```bash
+chmod 600 ~/.ssh/config
+```
+
+Теперь проверка выполняется одной командой:
+
+```bash
+ssh home-host
+```
+
+Быстрая проверка без интерактивной оболочки:
+
+```bash
+ssh home-host 'hostname; uptime'
+```
+
+Ожидаемый вывод должен содержать имя хоста за NAT и его время работы.
+
+## 6. Проверка с подробным логом
+
+Если подключение не работает:
+
+```bash
+ssh -vvv home-host
+```
+
+Ищите в выводе такие сообщения:
+
+```text
+Connecting to VPS_IP
+Authenticated to VPS
+Entering interactive session
+```
+
+Ошибки:
+
+```text
+Connection refused
+```
+
+На порту никто не слушает или туннель не запущен.
+
+```text
+Connection timed out
+```
+
+VPS или порт недоступен из сети Termux.
+
+```text
+channel ... open failed: connect failed
+```
+
+Reverse-туннель до хоста не работает, либо на хосте не запущен SSH-сервер.
+
+```text
+Permission denied (publickey)
+```
+
+Неверный ключ, пользователь или отсутствует публичный ключ в `authorized_keys`.
+
+## 7. Автоматическая проверка
+
+В Termux можно выполнить:
+
+```bash
+if ssh -o ConnectTimeout=5 \
+       -o BatchMode=yes \
+       home-host 'echo OK' 2>/dev/null
+then
+    echo "Туннель доступен"
+else
+    echo "Туннель недоступен"
+fi
+```
+
+Для проверки именно SSH-порта хоста через VPS:
+
+```bash
+ssh -o ConnectTimeout=5 \
+    -o BatchMode=yes \
+    home-host 'hostname'
+```
+
+Для проверки доступности reverse-порта непосредственно через VPS:
+
+```bash
+ssh -o ConnectTimeout=5 \
+    vps 'nc -zv -w 5 127.0.0.1 22022'
+```
+
+Если эта команда возвращает успешное соединение, порт reverse-туннеля на VPS слушается. Если после этого `ssh home-host` не работает, проверяйте ключ и пользователя хоста.
+
+## Рекомендуемая последовательность
+
+```bash
+ping -c 3 VPS_IP
+nc -zv -w 5 VPS_IP 22
+ssh vps
+ssh -p 22022 home-user@127.0.0.1
+exit
+ssh home-host 'hostname'
+```
+
+Последняя команда — наиболее важная: она проверяет весь путь от Termux через VPS до хоста за NAT.
+
+Цитаты:
+[1] Тонкая настройка сетевых туннелей в Termux: использование ... https://rybinsklab.ru/termux/post.php?slug=tonkaya-nastroyka-setevyh-tunneley-v-termux--ispolzovanie-wireguard-tailscale-i-ssh-multipleksirovaniya-dlya-bezopasnyh-soedineniy-0112
+[2] SSH-туннель на Android: настройка, приложения и решение ... https://your-android.vercel.app/articles/s/ss/ssh-tunnel-android.html
+[3] Networking https://termux.achik.us/category/networking/
+[4] termux.achik.us › termux-networking-commands-listTermux Networking Commands List – Ping, Curl, Wget, DNS Tools https://termux.achik.us/termux-networking-commands-list/
+[5] FAQ - Termux Wiki https://wiki.termux.com/wiki/FAQ
+[6] SSH-клиент для Android: обзор лучших приложений и настройка https://your-android.vercel.app/articles/a/an/android-ssh-client.html
+[7] Мониторинг Умного Дома и его окружения телефоном без ... - Habr https://habr.com/ru/amp/publications/1084174/
+[8] Мониторинг Умного Дома и его окружения телефоном без ... https://habr.com/ru/articles/1084174/
+[9] Касательно детектирования сервисов обхода - DTF https://dtf.ru/id3436480/4998333-obnaruzhenie-servisov-obhoda-vpn-i-problemy-bezopasnosti
+[10] SSH-туннели на Android, понятный обзор с примерами и ... https://www.securitylab.ru/blog/personal/Bitshield/356615.php
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Как сохранить это подключение в ~/.ssh/config
+
+В Termux сохраните подключение в файле `~/.ssh/config`. Для вашей схемы нужны два блока: один для VPS, второй — для хоста за NAT через reverse-туннель.
+
+## 1. Создайте SSH-конфигурацию
+
+В Termux:
+
+```bash
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/config
+```
+
+Добавьте:
+
+```sshconfig
+Host vps
+    HostName VPS_IP
+    User vps-user
+    Port 22
+    IdentityFile ~/.ssh/vps_key
+    IdentitiesOnly yes
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
+
+Host home-host
+    HostName 127.0.0.1
+    Port 22022
+    User home-user
+    ProxyJump vps
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
+```
+
+Замените:
+
+```text
+VPS_IP
+vps-user
+vps_key
+home-user
+```
+
+на свои значения.
+
+Например:
+
+```sshconfig
+Host vps
+    HostName 203.0.113.10
+    User ubuntu
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+
+Host home-host
+    HostName 127.0.0.1
+    Port 22022
+    User alex
+    ProxyJump vps
+    ServerAliveInterval 20
+    ServerAliveCountMax 3
+```
+
+Файл `~/.ssh/config` позволяет обращаться к серверу по короткому имени вместо указания адреса, порта, пользователя и ключа каждый раз [1][4].
+
+Сохраните файл в `nano`:
+
+```text
+Ctrl+O
+Enter
+Ctrl+X
+```
+
+Установите права:
+
+```bash
+chmod 600 ~/.ssh/config
+```
+
+## 2. Проверьте VPS
+
+```bash
+ssh vps
+```
+
+Если вход успешен, выйдите:
+
+```bash
+exit
+```
+
+Проверка без открытия оболочки:
+
+```bash
+ssh vps 'echo VPS_OK'
+```
+
+Ожидаемый результат:
+
+```text
+VPS_OK
+```
+
+## 3. Подключитесь к хосту за NAT
+
+Теперь достаточно выполнить:
+
+```bash
+ssh home-host
+```
+
+SSH сначала подключится к `vps`, затем через `ProxyJump` использует VPS для доступа к reverse-порту `22022`, который ведёт на хост за NAT.
+
+Проверка командой:
+
+```bash
+ssh home-host 'hostname; uptime'
+```
+
+Ожидаемый результат:
+
+```text
+имя-хоста-за-NAT
+время работы системы
+```
+
+## 4. Если ключ для VPS другой
+
+Если ключ лежит, например, здесь:
+
+```text
+~/.ssh/vps_tunnel
+```
+
+укажите:
+
+```sshconfig
+IdentityFile ~/.ssh/vps_tunnel
+```
+
+Если для хоста за NAT используется другой ключ, добавьте его во второй блок:
+
+```sshconfig
+Host home-host
+    HostName 127.0.0.1
+    Port 22022
+    User home-user
+    IdentityFile ~/.ssh/home_host_key
+    IdentitiesOnly yes
+    ProxyJump vps
+```
+
+Чаще всего ключ хоста за NAT уже проверяется самим хостом после перехода через VPS, поэтому отдельный `IdentityFile` во втором блоке может быть не нужен.
+
+## 5. Проверьте применяемые параметры
+
+Команда:
+
+```bash
+ssh -G home-host
+```
+
+Покажет фактическую конфигурацию, которую SSH применит для подключения. Удобно проверить:
+
+```bash
+ssh -G home-host | grep -E 'hostname|user|port|identityfile|proxyjump'
+```
+
+В выводе должны быть примерно такие значения:
+
+```text
+hostname 127.0.0.1
+user home-user
+port 22022
+proxyjump vps
+```
+
+## 6. Диагностика
+
+Если подключение не работает, запустите подробный режим:
+
+```bash
+ssh -vvv home-host
+```
+
+Основные ошибки:
+
+```text
+Connection refused
+```
+
+На VPS не слушается порт `22022`, либо reverse-туннель на хосте не запущен.
+
+```text
+Connection timed out
+```
+
+Termux не может достучаться до VPS или SSH-порт VPS недоступен.
+
+```text
+Permission denied (publickey)
+```
+
+Неверный ключ, пользователь или публичный ключ отсутствует в `authorized_keys`.
+
+```text
+channel open failed
+```
+
+VPS доступен, но reverse-туннель до хоста за NAT не работает.
+
+## Итог
+
+После настройки подключение выполняется коротко:
+
+```bash
+ssh vps
+```
+
+— подключение к VPS.
+
+```bash
+ssh home-host
+```
+
+— подключение к хосту за NAT через VPS.
+
+Для проверки:
+
+```bash
+ssh home-host 'echo CONNECTED && hostname'
+```
+
+Если используется `ProxyJump`, убедитесь, что `vps` и `home-host` находятся в одном файле `~/.ssh/config`, а файл имеет права `600`; стандартный SSH-клиент применяет эти параметры по имени блока `Host` [3][5].
+
+Цитаты:
+[1] Как подключиться к VPS по SSH: Windows, macOS и Linux https://cloud.servermall.ru/blog/chto-nastroit-srazu-posle-pokupki-vps-ssh-klyuchi-sudo-ufw-fail2ban-obnovleniya-monitoring-otkrytye-porty-i-vneshnie-bekapy/
+[2] Сохрани свои SSH-подключения, запускай ИИ-агентов прямо на ... https://agentsroom.dev/ru/features/ssh-connections
+[3] Как настроить пользовательские параметры подключения для ... https://ru.linux-terminal.com/?p=10399
+[4] SSH из cmd и терминала: подключение к серверу - Otus.ru https://otus.ru/journal/ssh-i-rabota-s-klient-servernymi-modelyami/
+[5] Установка и настройка SSH для безопасного доступа | AlexHost https://alexhost.com/ru/faq/how-to-install-and-configure-ssh/
+[6] Подключение к нескольким Linux-серверам по SSH без ввода ... https://habr.com/ru/articles/938968/
+[7] SSH — ALT Linux Wiki https://www.altlinux.org/SSH
+[8] Изнурительно подробное руководство по SSH (лишь те аспекты ... https://habr.com/ru/articles/1037106/
+[9] Памятка пользователям ssh https://habr.com/ru/articles/122445/
+[10] Утилита для удобного подключения к удаленным серверам ... https://www.linux.org.ru/forum/admin/15425421
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

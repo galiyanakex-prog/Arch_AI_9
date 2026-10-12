@@ -1,0 +1,5 @@
+### D7: авторизация транспорта ###
+[public] подключён, тулов: 1
+[no-token] ожидаемо отклонён: handshake не удался: Server returned an error response
+[with-token] подключён, тулов: 1
+LIVE D7 OK

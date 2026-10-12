@@ -1,0 +1,8 @@
+[RAG] Оценка по /home/u/Документы/111111/Обучение_Курсы/Основной_репозиторий/AI_9/rag/datasets/queries.jsonl (k=5, режим hybrid):
+  recall@k: 0.8824
+  precision@k: 0.2113
+  hit_rate@k: 0.8824
+  mrr: 0.7240
+  ndcg@k: 0.9026
+  recall@20: 0.8824
+  латентность: p50=126 мс, p95=148 мс

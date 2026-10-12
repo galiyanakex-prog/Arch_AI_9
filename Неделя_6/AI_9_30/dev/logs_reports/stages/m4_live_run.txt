@@ -1,0 +1,9 @@
+[MCP] «time»: подключён (READY)
+[MCP] «weather»: подключён (READY)
+[Память] Пользователь «w17» найден, контекст загружен. Задача: Основная_задача
+[Режим] Доставка слоёв: ['invariants', 'long_term', 'profile', 'short_term', 'working']
+Команды: /memory /profile [list|show|use|new|route|auto] /tasks /task [retry] /plan /approve /goto /transitions /step /run /pause /resume /deliver /compare /summary /state /tokens /cost /help /exit
+
+Вы [Основная_задача]: Агент: Сейчас в Москве 12:38.
+
+Вы [Основная_задача]: [Выход] Состояние сохранено. До встречи!

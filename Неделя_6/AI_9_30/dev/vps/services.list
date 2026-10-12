@@ -1,0 +1,8 @@
+# services.list — список пользовательских systemd-юнитов MCP для деплоя.
+# Формат: <имя-юнита-без-.service>:<порт>. deploy_services.sh ставит, включает
+# и печатает статус каждого. Строки с # и пустые пропускаются.
+#
+# Этап 1 (И2б): time. Этап 3 (И3): scheduler + pipeline (несколько серверов).
+mcp-time-server:8000
+mcp-scheduler-server:8010
+mcp-pipeline-server:8020

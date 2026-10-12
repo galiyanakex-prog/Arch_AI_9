@@ -1,0 +1,6 @@
+# probe :8000  2026-09-30T20:09:10Z
+mcp-session-id: 23d3ab5007ae496d820da39c1f962b13
+-- tools/list --
+event: message
+data: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"description":"Текущее время в указанном часовом поясе (IANA) в формате ISO 8601.\n\nArgs:\n    timezone_name: IANA-имя зоны: Europe/Moscow, Asia/Tokyo, UTC и т.п.\n\nReturns:\n    ISO 8601 время в указанной зоне либо текст ошибки для неизвестной зоны.\n","inputSchema":{"properties":{"timezone_name":{"default":"UTC","title":"Timezone Name","type":"string"}},"type":"object","title":"get_timeArguments"},"name":"get_time","outputSchema":{"properties":{"result":{"title":"Result","type":"string"}},"required":["result"],"type":"object","title":"get_timeOutput"}}]}}
+
