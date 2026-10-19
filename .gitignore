@@ -13,24 +13,22 @@ check_models.py
 .tmp
 
 # Видео
-.mp4
-.mov
+*.mp4
+*.mov
 
 # SSH
 .ssh
-
-
 
 # RAG: артефакты индекса (восстанавливаются командой --rag-ingest)
 rag/index/
 rag/.tmp/
 
+# Шлюз на VPS: база пользователей и история чата (создаётся на месте, не в git)
+gateway/users.db
+gateway/__pycache__/
 
-# Окружение
-.venv
-.kodacli
+# Автосекрет сессии шлюза (решение №27) — генерируется на месте, не в git
+gateway/.secret
 
-
-old_vers
-
-tests_debug
+Den_log.md
+tokens.csv
