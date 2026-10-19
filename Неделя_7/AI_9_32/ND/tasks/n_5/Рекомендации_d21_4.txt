@@ -1,0 +1,1194 @@
+Ниже — подробный `README.md`, согласованный с текущей архитектурой проекта: Ollama используется только для embeddings, генерация остаётся в существующем учебном агенте, а SQLite хранит локальный индекс. Ollama предназначена для создания embeddings для semantic search, retrieval и RAG; endpoint `/api/embed` принимает один текст или список текстов и возвращает векторные представления. [1][2]
+
+```markdown
+# rag-doc-index
+
+Локальный индексатор документов для RAG на Python.
+
+Проект реализует базовый retrieval-слой:
+
+1. загрузка документов;
+2. извлечение текста;
+3. разбиение на чанки двумя стратегиями;
+4. генерация embeddings через Ollama;
+5. сохранение документов, чанков и векторов в SQLite;
+6. поиск по cosine similarity;
+7. подготовка контекста для внешнего учебного агента.
+
+Генеративная LLM в этом проекте не запускается: она уже используется в учебном агенте. Ollama применяется как локальный сервис для embedding-модели.
+
+---
+
+## 1. Назначение
+
+Цель проекта — построить самостоятельный embedding и retrieval-модуль, который можно подключить к существующему агенту.
+
+Итоговая схема:
+
+```text
+Документы
+    ↓
+Loaders
+    ↓
+Chunking
+    ↓
+Ollama embedding model
+    ↓
+SQLite index
+    ↓
+Embedding пользовательского запроса
+    ↓
+Cosine similarity
+    ↓
+Top-K релевантных чанков
+    ↓
+Учебный агент
+    ↓
+Существующая генеративная LLM
+    ↓
+Ответ со ссылками на источники
+```
+
+---
+
+## 2. Архитектура
+
+Проект разделён на следующие слои:
+
+- `loaders` — чтение документов и извлечение текста;
+- `chunking` — разбиение текста на чанки;
+- `models` — работа с Ollama и embedding-векторами;
+- `indexing` — создание SQLite-индекса;
+- `retrieval` — поиск по cosine similarity;
+- `evaluation` — сравнение стратегий chunking;
+- `scripts` — CLI-сценарии;
+- `tests` — автоматические тесты.
+
+### 2.1. Индексация
+
+```text
+Файл
+  ↓
+Loader
+  ↓
+LoadedDocument
+  ↓
+FixedSizeChunker / StructuredChunker
+  ↓
+Chunk
+  ↓
+OllamaEmbeddingClient
+  ↓
+Embedding vector
+  ↓
+Repository
+  ↓
+SQLite
+```
+
+### 2.2. Поиск
+
+```text
+Запрос пользователя
+  ↓
+OllamaEmbeddingClient
+  ↓
+Embedding запроса
+  ↓
+SQLite: сохранённые embeddings
+  ↓
+Cosine similarity
+  ↓
+Сортировка по score
+  ↓
+Top-K RetrievedChunk
+```
+
+---
+
+## 3. Структура проекта
+
+```text
+rag-doc-index/
+├─ pyproject.toml
+├─ README.md
+├─ .env
+├─ data/
+│  ├─ raw/
+│  │  ├─ README.md
+│  │  ├─ articles/
+│  │  ├─ code/
+│  │  └─ pdf/
+│  ├─ processed/
+│  │  └─ chunking_comparison.csv
+│  └─ index/
+│     └─ rag.db
+├─ scripts/
+│  ├─ build_index.py
+│  ├─ search_demo.py
+│  └─ compare_chunking.py
+├─ src/
+│  └─ rag_index/
+│     ├─ __init__.py
+│     ├─ __main__.py
+│     ├─ config.py
+│     ├─ logging_config.py
+│     ├─ chunking/
+│     │  ├─ __init__.py
+│     │  ├─ base.py
+│     │  ├─ fixed_size.py
+│     │  └─ structured.py
+│     ├─ evaluation/
+│     │  ├─ __init__.py
+│     │  ├─ compare.py
+│     │  └─ metrics.py
+│     ├─ indexing/
+│     │  ├─ __init__.py
+│     │  ├─ indexer.py
+│     │  ├─ repository.py
+│     │  └─ schema.py
+│     ├─ loaders/
+│     │  ├─ __init__.py
+│     │  ├─ base.py
+│     │  ├─ code_loader.py
+│     │  ├─ markdown_loader.py
+│     │  └─ pdf_loader.py
+│     ├─ models/
+│     │  ├─ __init__.py
+│     │  ├─ embeddings.py
+│     │  └─ ollama_client.py
+│     └─ retrieval/
+│        ├─ __init__.py
+│        ├─ cosine.py
+│        └─ retriever.py
+└─ tests/
+   ├─ test_chunking.py
+   ├─ test_cosine.py
+   ├─ test_metrics.py
+   ├─ test_repository.py
+   └─ test_retrieval.py
+```
+
+---
+
+## 4. Требования
+
+Для запуска нужны:
+
+- Python 3.11 или новее;
+- Ollama;
+- установленная embedding-модель Ollama;
+- зависимости из `pyproject.toml`.
+
+SQLite отдельно устанавливать не нужно: модуль `sqlite3` входит в стандартную библиотеку Python и предоставляет интерфейс к локальной SQLite-базе без отдельного серверного процесса. [web:5]
+
+---
+
+## 5. Установка Ollama
+
+Установи Ollama с официального сайта:
+
+```text
+[https://ollama.com/download](https://ollama.com/download)
+```
+
+После установки проверь, что команда доступна:
+
+```bash
+ollama --version
+```
+
+Проверь доступность локального API:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+По умолчанию локальный API Ollama доступен на:
+
+```text
+http://localhost:11434/api
+```
+
+Embedding endpoint:
+
+```text
+http://localhost:11434/api/embed
+```
+
+Ollama предоставляет endpoint `/api/embed` для получения embeddings из текста. [web:33][web:44]
+
+---
+
+## 6. Установка Python-зависимостей
+
+Из корня проекта выполни:
+
+```bash
+python -m venv .venv
+```
+
+### Linux и macOS
+
+```bash
+source .venv/bin/activate
+```
+
+### Windows PowerShell
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Установи проект в editable-режиме:
+
+```bash
+python -m pip install --upgrade pip
+pip install -e .
+```
+
+Для установки зависимостей разработки:
+
+```bash
+pip install -e ".[dev]"
+```
+
+В этот набор входят:
+
+- `ollama` — Python-клиент Ollama;
+- `pydantic` и `pydantic-settings` — конфигурация;
+- `numpy` — вычисление cosine similarity;
+- `pymupdf` — извлечение текста из PDF;
+- `pytest` — тестирование;
+- `ruff` — проверка стиля;
+- `mypy` — статический анализ типов.
+
+Python-клиент Ollama поддерживает получение одного embedding и batch embeddings через `ollama.embed(...)`. [web:46]
+
+---
+
+## 7. Embedding-модели
+
+Для проекта можно использовать одну из следующих моделей:
+
+### Вариант 1: `embeddinggemma`
+
+```bash
+ollama pull embeddinggemma
+```
+
+Проверка:
+
+```bash
+ollama run embeddinggemma
+```
+
+Это рекомендуемый простой вариант для первого запуска.
+
+### Вариант 2: `qwen3-embedding`
+
+```bash
+ollama pull qwen3-embedding
+```
+
+Эта модель подходит, если нужно сравнить качество retrieval с другим embedding-решением.
+
+### Вариант 3: `all-minilm`
+
+```bash
+ollama pull all-minilm
+```
+
+Это вариант для более лёгких экспериментов.
+
+Ollama перечисляет `embeddinggemma`, `qwen3-embedding` и `all-minilm` среди embedding-моделей для semantic search, retrieval и RAG. [web:20][web:44]
+
+### Проверка embeddings через API
+
+```bash
+curl http://localhost:11434/api/embed \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"embeddinggemma\",\"input\":\"Что такое RAG?\"}"
+```
+
+Для batch-запроса:
+
+```bash
+curl http://localhost:11434/api/embed \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"embeddinggemma\",\"input\":[\"Первый текст\",\"Второй текст\"]}"
+```
+
+Для индексации и поиска нужно использовать одну и ту же embedding-модель. Нельзя строить индекс одной моделью, а запросы отправлять в другую, не переиндексировав документы.
+
+---
+
+## 8. Конфигурация
+
+Создай файл `.env` в корне проекта:
+
+```env
+OLLAMA_HOST=http://localhost:11434
+EMBEDDING_MODEL=embeddinggemma
+
+DATA_DIR=data
+RAW_DIR=data/raw
+PROCESSED_DIR=data/processed
+INDEX_DIR=data/index
+DB_PATH=data/index/rag.db
+
+TOP_K=5
+
+FIXED_CHUNK_SIZE=1000
+FIXED_CHUNK_OVERLAP=150
+
+STRUCTURED_MAX_CHUNK_SIZE=1200
+STRUCTURED_OVERLAP_TAIL_CHARS=120
+```
+
+Основные параметры:
+
+| Переменная | Назначение |
+|---|---|
+| `OLLAMA_HOST` | Адрес Ollama API |
+| `EMBEDDING_MODEL` | Embedding-модель |
+| `RAW_DIR` | Каталог исходных документов |
+| `DB_PATH` | Путь к SQLite-файлу |
+| `TOP_K` | Число возвращаемых чанков |
+| `FIXED_CHUNK_SIZE` | Размер фиксированного чанка |
+| `FIXED_CHUNK_OVERLAP` | Перекрытие фиксированных чанков |
+| `STRUCTURED_MAX_CHUNK_SIZE` | Максимальный размер структурного чанка |
+| `STRUCTURED_OVERLAP_TAIL_CHARS` | Перекрытие структурных подчанков |
+
+Конфигурация загружается в `src/rag_index/config.py` через `pydantic-settings`.
+
+---
+
+## 9. Подготовка документов
+
+Положи исходные документы в:
+
+```text
+data/raw/
+```
+
+Поддерживаемые расширения:
+
+```text
+.md
+.markdown
+.pdf
+.py
+.js
+.ts
+.java
+.go
+.txt
+.json
+.yaml
+.yml
+```
+
+Пример:
+
+```text
+data/raw/
+├─ rag-introduction.md
+├─ mcp-notes.md
+├─ articles/
+│  └─ retrieval.md
+├─ code/
+│  ├─ example.py
+│  └─ agent.py
+└─ pdf/
+   └─ lecture.pdf
+```
+
+Для задания желательно использовать корпус объёмом минимум 20–30 страниц текста или сопоставимый объём исходного кода.
+
+---
+
+## 10. Loaders
+
+Каждый loader возвращает объект `LoadedDocument`:
+
+```python
+LoadedDocument(
+    doc_id="...",
+    source="...",
+    title="...",
+    path="...",
+    doc_type="...",
+    text="...",
+)
+```
+
+### Markdown
+
+`MarkdownLoader`:
+
+- читает файл в UTF-8;
+- использует имя файла как title;
+- сохраняет путь к источнику;
+- возвращает тип `markdown`.
+
+### Code
+
+`CodeLoader`:
+
+- читает код как обычный текст;
+- определяет `doc_type` по расширению;
+- сохраняет исходный файл как источник.
+
+### PDF
+
+`PdfLoader`:
+
+- открывает PDF через PyMuPDF;
+- извлекает текст каждой страницы;
+- объединяет страницы в единый текст.
+
+Если PDF состоит из сканированных изображений, обычное извлечение текста может вернуть пустой или неполный результат. В таком случае потребуется отдельный OCR-слой.
+
+---
+
+## 11. Стратегии chunking
+
+В проекте реализованы две стратегии.
+
+### 11.1. Fixed-size chunking
+
+Файл:
+
+```text
+src/rag_index/chunking/fixed_size.py
+```
+
+Стратегия:
+
+```text
+текст → куски фиксированного размера → overlap
+```
+
+Параметры по умолчанию:
+
+```text
+chunk_size = 1000 символов
+overlap = 150 символов
+```
+
+Преимущества:
+
+- простая реализация;
+- предсказуемые размеры;
+- хороший baseline;
+- легко сравнивать результаты.
+
+Недостатки:
+
+- граница чанка может разрезать предложение;
+- может быть потерян смысловой контекст;
+- структура документа не учитывается.
+
+### 11.2. Structured chunking
+
+Файл:
+
+```text
+src/rag_index/chunking/structured.py
+```
+
+Стратегия:
+
+```text
+текст
+  ↓
+поиск заголовков
+  ↓
+формирование секций
+  ↓
+разбиение слишком больших секций
+```
+
+Поддерживаются Markdown-заголовки:
+
+```markdown
+# Раздел
+## Подраздел
+### Детали
+```
+
+Преимущества:
+
+- лучше сохраняет структуру;
+- удобно для README и статей;
+- в метаданных сохраняется название секции.
+
+Недостатки:
+
+- размер чанков неоднородный;
+- эвристика заголовков не универсальна;
+- для неструктурированного текста может работать хуже.
+
+---
+
+## 12. SQLite-схема
+
+SQLite-файл создаётся по пути:
+
+```text
+data/index/rag.db
+```
+
+### Таблица `documents`
+
+Хранит информацию об исходных документах:
+
+```sql
+documents(
+    doc_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    title TEXT NOT NULL,
+    path TEXT NOT NULL,
+    doc_type TEXT NOT NULL,
+    created_at TEXT
+)
+```
+
+### Таблица `chunks`
+
+Хранит текстовые фрагменты:
+
+```sql
+chunks(
+    chunk_id TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    section TEXT,
+    chunk_index INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    char_len INTEGER NOT NULL,
+    token_len INTEGER,
+    created_at TEXT
+)
+```
+
+### Таблица `embeddings`
+
+Хранит embeddings:
+
+```sql
+embeddings(
+    chunk_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    vector TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    created_at TEXT,
+    PRIMARY KEY(chunk_id, model_name)
+)
+```
+
+В текущей реализации embedding хранится как JSON-массив в поле `TEXT`.
+
+Например:
+
+```json
+[0.0123, -0.0441, 0.2388, 0.0912]
+```
+
+Это удобно для учебного прототипа. Для крупного проекта можно перейти на бинарный формат `BLOB` или специализированное векторное хранилище.
+
+---
+
+## 13. Построение индекса
+
+Перед первым запуском убедись, что:
+
+```bash
+ollama pull embeddinggemma
+```
+
+Документы должны находиться в `data/raw/`.
+
+Запуск:
+
+```bash
+python scripts/build_index.py \
+  --input-dir data/raw \
+  --db-path data/index/rag.db \
+  --model embeddinggemma
+```
+
+В Windows PowerShell можно использовать одну строку:
+
+```powershell
+python scripts/build_index.py --input-dir data/raw --db-path data/index/rag.db --model embeddinggemma
+```
+
+Ожидаемый вывод:
+
+```text
+Indexed documents: 5
+Indexed chunks: 120
+Indexed embeddings: 120
+```
+
+После запуска должны появиться:
+
+```text
+data/index/rag.db
+```
+
+В текущей реализации `Indexer.index_documents()` создаёт чанки обеими стратегиями:
+
+```text
+fixed_size
+structured
+```
+
+Поэтому число записей в `chunks` будет равно сумме чанков двух стратегий.
+
+---
+
+## 14. Проверка SQLite
+
+Проверить наличие файла:
+
+```bash
+ls data/index
+```
+
+Для Windows PowerShell:
+
+```powershell
+Get-ChildItem data/index
+```
+
+Открыть SQLite:
+
+```bash
+sqlite3 data/index/rag.db
+```
+
+Внутри SQLite выполнить:
+
+```sql
+.tables
+```
+
+Ожидаемый результат:
+
+```text
+chunks
+documents
+embeddings
+```
+
+Проверить количество документов:
+
+```sql
+SELECT COUNT(*) FROM documents;
+```
+
+Проверить количество чанков:
+
+```sql
+SELECT strategy, COUNT(*)
+FROM chunks
+GROUP BY strategy;
+```
+
+Проверить количество embeddings:
+
+```sql
+SELECT model_name, COUNT(*)
+FROM embeddings
+GROUP BY model_name;
+```
+
+Выйти:
+
+```sql
+.quit
+```
+
+---
+
+## 15. Поиск по cosine similarity
+
+Запуск поиска:
+
+```bash
+python scripts/search_demo.py \
+  --db-path data/index/rag.db \
+  --model embeddinggemma \
+  --query "Что такое chunking в RAG?" \
+  --top-k 5
+```
+
+Пример вывода:
+
+```text
+#1 score=0.8421
+title: rag-introduction
+source: data/raw/rag-introduction.md
+section: Chunking
+chunk_id: ...
+text: ...
+
+#2 score=0.8014
+title: retrieval
+source: data/raw/articles/retrieval.md
+section: Embeddings
+chunk_id: ...
+text: ...
+```
+
+`score` — cosine similarity между embedding запроса и embedding чанка.
+
+Формула:
+
+```text
+cosine_similarity(a, b) =
+    dot(a, b) / (norm(a) * norm(b))
+```
+
+Если оба вектора нормализованы, cosine similarity сводится к скалярному произведению. Ollama указывает, что `/api/embed` возвращает L2-нормализованные вектора, то есть unit-length embeddings. [web:20]
+
+---
+
+## 16. Сравнение chunking
+
+Запуск:
+
+```bash
+python scripts/compare_chunking.py \
+  --input-dir data/raw \
+  --out-csv data/processed/chunking_comparison.csv
+```
+
+Результат:
+
+```text
+data/processed/chunking_comparison.csv
+```
+
+В CSV сохраняются:
+
+- стратегия;
+- количество документов;
+- количество чанков;
+- средняя длина;
+- минимальная длина;
+- максимальная длина;
+- стандартное отклонение длины.
+
+Пример:
+
+```csv
+strategy,documents,chunks,avg_chunk_len,min_chunk_len,max_chunk_len,std_chunk_len
+fixed_size,5,80,942.2,120,1000,141.5
+structured,5,63,1104.8,210,1200,236.1
+```
+
+Эта статистика показывает поведение chunking, но ещё не доказывает, какая стратегия лучше для retrieval. Для полноценного сравнения нужны тестовые вопросы и эталонные релевантные документы или чанки.
+
+---
+
+## 17. Запуск через единый CLI
+
+Сравнение стратегий:
+
+```bash
+python -m rag_index compare \
+  --input-dir data/raw \
+  --out-csv data/processed/chunking_comparison.csv
+```
+
+Поиск:
+
+```bash
+python -m rag_index search \
+  --db-path data/index/rag.db \
+  --model embeddinggemma \
+  --query "Как работает RAG?" \
+  --top-k 5
+```
+
+Если проект установлен через:
+
+```bash
+pip install -e .
+```
+
+можно использовать entry point:
+
+```bash
+rag-index search --query "Как работает RAG?"
+```
+
+---
+
+## 18. Тестирование
+
+Запустить все тесты:
+
+```bash
+pytest
+```
+
+С подробным выводом:
+
+```bash
+pytest -v
+```
+
+Запустить отдельный набор:
+
+```bash
+pytest tests/test_cosine.py
+```
+
+```bash
+pytest tests/test_chunking.py
+```
+
+```bash
+pytest tests/test_retrieval.py
+```
+
+Тесты проверяют:
+
+- cosine similarity;
+- zero-vector case;
+- fixed-size chunking;
+- structured chunking;
+- SQLite repository;
+- выбор лучшего чанка;
+- метрики chunking и retrieval.
+
+В тесте retrieval Ollama заменяется на `DummyEmbedder`, чтобы unit-тесты не зависели от запущенного сервиса и конкретной модели.
+
+---
+
+## 19. Проверка Ollama отдельно
+
+Перед индексацией полезно проверить Ollama независимо от Python-кода:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+Проверить embedding:
+
+```bash
+curl http://localhost:11434/api/embed \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"embeddinggemma\",\"input\":\"Тестовый текст\"}"
+```
+
+Если API недоступен:
+
+1. проверить, запущен ли Ollama;
+2. проверить переменную `OLLAMA_HOST`;
+3. проверить наличие модели через `ollama list`;
+4. повторить `ollama pull embeddinggemma`.
+
+Список установленных моделей:
+
+```bash
+ollama list
+```
+
+---
+
+## 20. Подключение к внешнему агенту
+
+После того как standalone retrieval-модуль проверен, его можно подключать к существующему агенту.
+
+Логика интеграции:
+
+```text
+Вопрос пользователя
+  ↓
+Агент вызывает retrieval-инструмент
+  ↓
+Retriever получает top-K чанков
+  ↓
+Агент формирует контекст
+  ↓
+Контекст добавляется в prompt
+  ↓
+Генеративная LLM агента формирует ответ
+  ↓
+Ответ содержит источники
+```
+
+Пример формата результата retrieval:
+
+```json
+{
+  "query": "Что такое chunking?",
+  "results": [
+    {
+      "chunk_id": "chunk-001",
+      "score": 0.84,
+      "text": "Chunking — это...",
+      "source": "data/raw/rag.md",
+      "title": "RAG",
+      "section": "Chunking"
+    }
+  ]
+}
+```
+
+Агент может использовать этот результат при формировании prompt:
+
+```text
+Ответь на вопрос только на основе контекста ниже.
+
+Вопрос:
+Что такое chunking?
+
+Контекст:
+[Источник: rag.md, раздел: Chunking]
+Chunking — это разбиение документа на фрагменты...
+
+Требования:
+- не придумывай факты;
+- если ответа нет в контексте, сообщи об этом;
+- укажи источник.
+```
+
+---
+
+## 21. Рекомендуемый контракт retrieval-модуля
+
+Для будущей интеграции желательно придерживаться простого интерфейса:
+
+```python
+results = retriever.search(
+    query="Что такое RAG?",
+    top_k=5,
+)
+```
+
+Каждый результат должен содержать:
+
+```python
+RetrievedChunk(
+    chunk_id,
+    doc_id,
+    title,
+    source,
+    path,
+    section,
+    chunk_index,
+    text,
+    score,
+)
+```
+
+Так агент не зависит от внутренней схемы SQLite и работает только с публичным результатом поиска.
+
+---
+
+## 22. Ограничения текущей версии
+
+Текущая версия является учебным прототипом.
+
+Ограничения:
+
+- retrieval загружает все embeddings из SQLite в память;
+- поиск выполняется полным перебором;
+- embeddings хранятся как JSON в `TEXT`;
+- нет отдельного reranker;
+- нет HTTP-сервера для retrieval;
+- нет автоматического определения качества ответа;
+- нет OCR для сканированных PDF;
+- нет удаления устаревших документов по хэшу;
+- нет incremental indexing;
+- нет авторизации для внешнего API.
+
+Для корпуса на десятки страниц такой подход достаточен. При росте базы можно перейти к отдельному векторному индексу или SQLite-расширению для vector search.
+
+---
+
+## 23. Возможные улучшения
+
+### 23.1. Стабильные идентификаторы
+
+Сейчас `chunk_id` создаётся через UUID. Для production-подобного режима лучше вычислять ID из:
+
+```text
+hash(doc_id + strategy + chunk_index + text)
+```
+
+Это позволит не создавать новые идентификаторы при каждом повторном запуске.
+
+### 23.2. Incremental indexing
+
+Можно хранить:
+
+- hash файла;
+- дату изменения;
+- embedding model;
+- параметры chunking.
+
+Тогда при повторном запуске переиндексировать только изменившиеся документы.
+
+### 23.3. Reranking
+
+После cosine search можно взять, например, top-20 кандидатов и дополнительно переранжировать их cross-encoder-моделью. В итоговый prompt передавать top-3 или top-5 наиболее релевантных чанков.
+
+### 23.4. HTTP API retrieval
+
+Можно обернуть retriever в FastAPI:
+
+```text
+POST /search
+{
+  "query": "Что такое RAG?",
+  "top_k": 5
+}
+```
+
+Это позволит внешнему агенту вызывать retrieval как отдельный инструмент.
+
+### 23.5. Фильтрация по метаданным
+
+Можно добавить фильтры:
+
+- по типу документа;
+- по источнику;
+- по стратегии chunking;
+- по разделу;
+- по дате;
+- по версии документа.
+
+---
+
+## 24. Типовой сценарий запуска
+
+Полный сценарий:
+
+```bash
+python -m venv .venv
+```
+
+```bash
+source .venv/bin/activate
+```
+
+```bash
+pip install -e ".[dev]"
+```
+
+```bash
+ollama pull embeddinggemma
+```
+
+Положить документы в:
+
+```text
+data/raw/
+```
+
+Построить индекс:
+
+```bash
+python scripts/build_index.py \
+  --input-dir data/raw \
+  --db-path data/index/rag.db \
+  --model embeddinggemma
+```
+
+Проверить поиск:
+
+```bash
+python scripts/search_demo.py \
+  --db-path data/index/rag.db \
+  --model embeddinggemma \
+  --query "Что такое RAG?" \
+  --top-k 5
+```
+
+Сравнить chunking:
+
+```bash
+python scripts/compare_chunking.py \
+  --input-dir data/raw \
+  --out-csv data/processed/chunking_comparison.csv
+```
+
+Запустить тесты:
+
+```bash
+pytest -v
+```
+
+---
+
+## 25. Критерии готовности
+
+Проект можно считать готовым для задания, если выполнены все пункты:
+
+- [ ] В `data/raw/` лежит корпус документов объёмом минимум 20–30 страниц или эквивалент по коду.
+- [ ] Ollama установлена и доступна по HTTP.
+- [ ] Embedding-модель загружена.
+- [ ] Все документы читаются соответствующими loaders.
+- [ ] Реализованы две стратегии chunking.
+- [ ] Для чанков созданы embeddings.
+- [ ] Создан файл `data/index/rag.db`.
+- [ ] В SQLite есть таблицы `documents`, `chunks`, `embeddings`.
+- [ ] Векторы сохранены вместе с названием embedding-модели.
+- [ ] Поиск возвращает top-k чанков.
+- [ ] В результатах отображаются источники.
+- [ ] Создан CSV со сравнением chunking.
+- [ ] Unit-тесты запускаются.
+- [ ] Retrieval-модуль готов к вызову из учебного агента.
+
+---
+
+## 26. Результат проекта
+
+На выходе получается локальный компонент RAG:
+
+```text
+rag-doc-index
+```
+
+Он умеет:
+
+- принимать локальные документы;
+- разбивать их на смысловые или фиксированные чанки;
+- получать embeddings через Ollama;
+- хранить индекс в SQLite;
+- искать семантически близкие фрагменты;
+- возвращать текст вместе с источниками;
+- передавать найденный контекст внешнему генеративному агенту.
+
+Ключевая граница ответственности:
+
+```text
+rag-doc-index:
+    documents → embeddings → retrieval → sources
+
+учебный агент:
+    user query + retrieved context → generation → final answer
+```
+
+Такое разделение позволяет не дублировать генеративную LLM и использовать Ollama только там, где она нужна в рамках задания: для локального embedding-модуля.
+
+
+Цитаты:
+[1] Embeddings - Ollama documentation https://docs.ollama.com/capabilities/embeddings
+[2] Generate embeddings - Ollama https://docs.ollama.com/api/embed
+[3] sqlite3 — DB-API 2.0 interface for SQLite databases — Python 3.14 ... https://docs.python.org/3/library/sqlite3.html
+[4] ollama/docs/api.md at main - GitHub https://github.com/ollama/ollama/blob/main/docs/api.md
+[5] ollama.collabnix.com · docs · apiAPI Reference | Ollama Labs https://ollama.collabnix.com/docs/api/
+[6] docs.ollama.com https://docs.ollama.com/llms-full.txt
+[7] sqlite3 — DB-API 2.0 interface for SQLite databases - Python https://docs.python.org/3.10/library/sqlite3.html
+[8] Ollama Python library - GitHub https://github.com/ollama/ollama-python
+[9] Embedding models · Ollama Blog https://ollama.com/blog/embedding-models
+[10] sqlite3 — DB-API 2.0 interface for SQLite databases https://docs.python.org/it/3.8/library/sqlite3.html

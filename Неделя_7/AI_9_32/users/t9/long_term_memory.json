@@ -1,0 +1,11 @@
+{
+  "profile_ref": "__t9",
+  "tasks": [
+    {
+      "name": "Основная_задача",
+      "ref": "tasks/Основная_задача"
+    }
+  ],
+  "decisions": [],
+  "knowledge": []
+}

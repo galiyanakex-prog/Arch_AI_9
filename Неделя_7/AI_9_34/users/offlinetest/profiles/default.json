@@ -1,0 +1,14 @@
+{
+  "id": "offlinetest",
+  "profile_id": "default",
+  "name": "Тест",
+  "style": {
+    "answers": "краткий"
+  },
+  "constraints": {
+    "answers": "нет"
+  },
+  "context": {
+    "answers": "RAG"
+  }
+}

@@ -1,0 +1,1196 @@
+  У вас уже есть почти все механизмы, необходимые для безопасного MCP. Поэтому не стоит добавлять MCP как «ещё один слой» рядом с памятью или состояниями. Лучше встроить его как **внешний провайдер действий и контекста**, подключаемый через уже существующие `InvariantChecker`, `StateMachine`, `MemoryManager`, `Store` и DI.
+
+MCP-серверы предоставляют инструменты, которые клиент обнаруживает через `tools/list` и вызывает через `tools/call`; сервер также может уведомлять клиента об изменении каталога инструментов через `notifications/tools/list_changed` [1][2].
+
+## Главный вывод
+
+Вашу архитектуру лучше расширить так:
+
+
+```text
+core/
+├── agent.py
+├── state_machine.py
+├── invariants.py
+├── tool_policy.py
+├── tool_registry.py
+└── tool_executor.py
+
+integrations/
+└── mcp/
+    ├── client.py
+    ├── gateway.py
+    ├── provider.py
+    ├── transport.py
+    └── config.py
+```
+
+То есть:
+
+```text
+MCP
+  ↓
+инструменты
+  ↓
+ToolRegistry
+  ↓
+ToolPolicy + InvariantChecker
+  ↓
+ToolExecutor
+  ↓
+Agent
+```
+
+При этом:
+
+- `StateMachine` по-прежнему единолично управляет `TaskStage`;
+- `InvariantChecker` проверяет допустимость действия;
+- `MemoryManager` контролирует, что можно сохранить;
+- `Store` остаётся единственным владельцем файлов;
+- MCP не получает прямого доступа к вашим слоям.
+
+## Что меняется с учётом полной архитектуры
+
+В предыдущей рекомендации `MCPGateway` рассматривался как внешний сервисный слой. Для вашей реализации я бы уточнил его роль:
+
+> MCP Gateway — это адаптер внешних возможностей, а `ToolExecutor` — настоящая точка контроля.
+
+Это существенно, потому что в `den_15` уже есть сильная модель безопасности:
+
+```text
+StateMachine — можно ли перейти между этапами
+InvariantChecker — можно ли выполнить действие
+MCPGateway — как технически вызвать внешний инструмент
+```
+
+Не нужно заставлять MCP Gateway знать о стадиях, профилях и памяти. Иначе появятся циклические зависимости:
+
+```text
+Agent → MCPGateway → StateMachine → Agent
+```
+
+Этого следует избежать.
+
+## Обновлённая схема слоёв
+
+Ваши существующие слои можно сохранить почти без изменений.
+
+```text
+1. storage/
+   Store, SQLite, JSON, audit repositories
+
+2. memory/
+   MemoryManager и 4 слоя памяти
+
+3. core/
+   Agent, PromptBuilder, ProfileRouter,
+   StateMachine, InvariantChecker,
+   ToolRegistry, ToolPolicy, ToolExecutor
+
+4. integrations/
+   MCP-клиенты и внешние адаптеры
+
+5. CLI
+   Kod.py и команды управления
+```
+
+Но логически MCP будет находиться не «между core и storage», а рядом с внешними исполнителями:
+
+```text
+core.Agent
+   ├── LLMClient
+   ├── LocalToolExecutor
+   └── MCPToolExecutor
+              ↓
+         MCPGateway
+              ↓
+         MCP servers
+```
+
+## Самая важная граница: инструмент не равен переходу
+
+У вас `TaskStage` является формальным workflow. Поэтому вызов MCP-инструмента не должен автоматически означать переход состояния.
+
+Например:
+
+```text
+mcp.filesystem.write_file завершился успешно
+```
+
+не должно автоматически означать:
+
+```text
+implementation → validation
+```
+
+Корректная последовательность:
+
+```text
+LLM предложил вызов
+    ↓
+ToolPolicy разрешила действие
+    ↓
+InvariantChecker подтвердил действие
+    ↓
+MCP-инструмент выполнен
+    ↓
+результат обработан
+    ↓
+Agent решил, что делать дальше
+    ↓
+StateMachine.try_transition(...)
+```
+
+Даже если инструмент называется `validate`, он не должен сам переводить задачу в `validation`. Только существующая карта переходов должна иметь право это сделать.
+
+## Где разместить новые сущности
+
+Я бы добавил в `core` следующие абстракции.
+
+### `ToolDescriptor`
+
+Описывает инструмент в форме, понятной вашему агенту:
+
+```python
+@dataclass(frozen=True)
+class ToolDescriptor:
+    name: str
+    description: str
+    input_schema: dict
+    source: str              # local или mcp
+    provider: str            # server id или local
+    original_name: str
+    risk_level: str
+    allowed_stages: frozenset[TaskStage]
+    requires_confirmation: bool
+    enabled: bool = True
+```
+
+Пример:
+
+```text
+name: mcp.github.create_issue
+source: mcp
+provider: github
+original_name: create_issue
+risk_level: high
+allowed_stages: implementation
+requires_confirmation: true
+```
+
+Модель MCP здесь не должна протекать в `core`. `ToolDescriptor` — ваша внутренняя модель.
+
+### `ToolRegistry`
+
+Хранит инструменты всех источников:
+
+```python
+class ToolRegistry:
+    def register(self, descriptor, handler) -> None:
+        ...
+
+    def unregister_provider(self, provider: str) -> None:
+        ...
+
+    def get(self, name: str) -> ToolDescriptor:
+        ...
+
+    def available_for(self, context) -> list[ToolDescriptor]:
+        ...
+
+    def snapshot(self) -> list[ToolDescriptor]:
+        ...
+```
+
+В него попадут:
+
+```text
+local.approve_plan
+local.validate_task
+mcp.filesystem.read_file
+mcp.github.search_repositories
+```
+
+Но `ToolRegistry` не должен сам проверять бизнес-правила и не должен напрямую вызывать `StateMachine`.
+
+## Ваша модель инвариантов уже почти готова
+
+Вам не нужно создавать отдельную MCP-систему ограничений. Расширьте существующий `ProposedAction`.
+
+Сейчас у вас, судя по описанию, есть:
+
+```python
+ProposedAction(
+    technology=...,
+    adds_dependency=...,
+    changes_database_schema=...,
+    language=...,
+)
+```
+
+Добавьте MCP-поля:
+
+```python
+@dataclass(frozen=True)
+class ProposedAction:
+    action_type: str
+    tool_name: str | None = None
+    arguments: dict | None = None
+    technology: str | None = None
+    adds_dependency: bool = False
+    changes_database_schema: bool = False
+    language: str | None = None
+```
+
+Тогда действие:
+
+```python
+mcp.postgres.execute_query
+```
+
+проходит тот же механизм:
+
+```text
+ToolCall
+  ↓
+ProposedAction
+  ↓
+InvariantChecker
+  ↓
+разрешено / запрещено
+```
+
+Например, инвариант может запрещать:
+
+```text
+изменять схему базы данных через внешний инструмент
+```
+
+И это будет единое правило для:
+
+- локальной Python-функции;
+- MCP-инструмента;
+- будущего HTTP-инструмента;
+- действия, предложенного LLM.
+
+Это сильнее, чем отдельный `MCPPolicy`, потому что правило не зависит от канала исполнения.
+
+## Но стадии и инварианты нужно проверять отдельно
+
+Даже если действие прошло `InvariantChecker`, оно может быть запрещено текущей стадией.
+
+Пример:
+
+```text
+Инварианты: действие допустимо
+Стадия planning: действие запрещено
+```
+
+Поэтому pipeline должен быть таким:
+
+```text
+1. Инструмент существует?
+2. Инструмент включён?
+3. Аргументы соответствуют schema?
+4. Текущая стадия разрешает действие?
+5. Инварианты разрешают действие?
+6. Требуется подтверждение?
+7. Можно вызвать MCP?
+```
+
+В коде:
+
+```python
+async def execute(self, request, context):
+    tool = self.registry.get(request.name)
+
+    self._check_enabled(tool)
+    self._validate_schema(tool, request.arguments)
+    self._check_stage(tool, context.task_stage)
+    self._check_invariants(tool, request, context)
+    await self._require_confirmation_if_needed(tool, context)
+
+    return await self._invoke(tool, request.arguments)
+```
+
+Это сохраняет вашу существующую философию:
+
+```text
+StateMachine проверяет этап
+InvariantChecker проверяет действие
+ToolExecutor проверяет процедуру выполнения
+```
+
+## Что делать с `working_memory`
+
+Ваша `working_memory` уже содержит:
+
+```text
+description
+current_state
+decisions
+facts
+open_questions
+```
+
+Добавьте туда не сырые технические ответы MCP, а нормализованный блок внешнего действия:
+
+```python
+{
+    "external_actions": [
+        {
+            "execution_id": "exec-123",
+            "tool": "mcp.github.search_repositories",
+            "status": "succeeded",
+            "summary": "Найдено 8 репозиториев",
+            "at": "..."
+        }
+    ]
+}
+```
+
+Не сохраняйте автоматически весь JSON-ответ MCP. Причины:
+
+- ответ может быть большим;
+- он может содержать секреты;
+- он может быстро устаревать;
+- он будет раздувать промт;
+- он может изменить поведение агента после перезапуска.
+
+Лучше разделить:
+
+```text
+сырой ответ       → только текущий execution context
+краткое резюме   → working_memory
+важный факт       → long_term_memory, только по политике
+секреты           → никогда не сохранять
+```
+
+## Что делать с четырьмя слоями памяти
+
+Для MCP я бы ввёл отдельную политику сохранения:
+
+```python
+@dataclass(frozen=True)
+class ToolMemoryPolicy:
+    include_raw_result_in_current_prompt: bool = True
+    save_summary_to_short_term: bool = True
+    save_to_working: bool = False
+    save_to_long_term: bool = False
+    save_to_profile: bool = False
+```
+
+По умолчанию:
+
+```text
+short_term: да
+working: только нормализованный итог
+long_term: нет
+profile: нет
+```
+
+Особенно важно запретить автоматическое изменение профиля. MCP-сервер не должен получить возможность косвенно изменить:
+
+```text
+style
+constraints
+context
+skills
+```
+
+Изменение профиля должно проходить только через существующую явную механику профилей.
+
+## MCP как источник контекста
+
+Не все MCP-возможности являются действиями.
+
+Полезно разделить:
+
+```text
+MCP tools
+  → внешние операции
+
+MCP resources
+  → получение данных для контекста
+
+MCP prompts
+  → внешние шаблоны инструкций
+```
+
+Для вашей архитектуры:
+
+```text
+tools    → ToolRegistry + ToolExecutor
+resources → ContextProvider
+prompts  → не подключать автоматически
+```
+
+MCP resources можно позже представить так:
+
+```python
+class ContextProvider(Protocol):
+    async def get_context(
+        self,
+        request: ContextRequest,
+    ) -> ContextFragment:
+        ...
+```
+
+Затем добавить ресурс в `PromptBuilder` отдельным блоком:
+
+```text
+[system]
+[profile]
+[invariants]
+[external_context]
+[long_term]
+[working]
+[short_term]
+[user]
+```
+
+Но внешний контекст должен также проходить:
+
+- ограничение размера;
+- очистку секретов;
+- контроль источника;
+- токен-бюджет;
+- политику хранения.
+
+Не смешивайте внешний контекст с `long_term_memory`: это разные источники с разным уровнем доверия.
+
+## Профили и MCP
+
+Ваши профили содержат `skills[]` как декларативный упорядоченный pipeline. Это хороший задел для MCP, но я бы не помещал туда прямые вызовы инструментов.
+
+Лучше использовать профиль для политики доступности:
+
+```json
+{
+  "profile_id": "economist",
+  "skills": [
+    "analyze_costs",
+    "compare_options"
+  ],
+  "tool_policy": {
+    "allow": [
+      "mcp.search.web",
+      "mcp.finance.get_rates"
+    ],
+    "deny": [
+      "mcp.filesystem.write_file"
+    ]
+  }
+}
+```
+
+Однако profile policy должна быть только одним из фильтров. Итоговое разрешение:
+
+```text
+server enabled
+AND tool enabled
+AND profile allows
+AND stage allows
+AND invariant allows
+AND confirmation satisfied
+```
+
+Нельзя позволять профилю расширить глобальный запрет. Он может только сузить права.
+
+## StateMachine: что добавить, а чего не добавлять
+
+Не добавляйте MCP-состояния в `TaskStage`.
+
+Неправильно:
+
+```python
+TaskStage.MCP_CONNECTING
+TaskStage.MCP_FAILED
+TaskStage.WAITING_FOR_TOOL
+```
+
+Это смешает бизнес-жизненный цикл задачи с инфраструктурой.
+
+Создайте отдельный `ToolExecutionState`:
+
+```python
+class ToolExecutionState(str, Enum):
+    REQUESTED = "requested"
+    DENIED = "denied"
+    WAITING_CONFIRMATION = "waiting_confirmation"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+```
+
+И отдельно состояние подключения:
+
+```python
+class MCPConnectionState(str, Enum):
+    DISCONNECTED = "disconnected"
+    CONNECTING = "connecting"
+    READY = "ready"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+```
+
+`TaskStage` остаётся ровно вашим:
+
+```text
+new
+planning
+plan_approved
+implementation
+validation
+done
+paused
+failed
+```
+
+## Важное уточнение про `/step` и `/run`
+
+Сейчас ваши исполнители — `LLMExecutor` и `StubExecutor`. MCP лучше подключить не как третий жизненный цикл, а как один из каналов выполнения шага.
+
+Например:
+
+```python
+class StepExecutor(Protocol):
+    async def execute_step(
+        self,
+        task_state: TaskState,
+        context: AgentContext,
+    ) -> StepResult:
+        ...
+```
+
+Реализации:
+
+```text
+LLMStepExecutor
+StubStepExecutor
+ToolAwareStepExecutor
+```
+
+Но ещё лучше — не делать `MCPExecutor` отдельной заменой `LLMExecutor`. LLM должен планировать шаг, а `ToolExecutor` исполнять конкретные вызовы:
+
+```text
+/step
+  ↓
+LLMExecutor строит следующий шаг
+  ↓
+LLM предлагает tool call
+  ↓
+ToolExecutor проверяет и выполняет
+  ↓
+StepResult
+  ↓
+Agent обновляет состояние
+```
+
+Так `/step` остаётся вашим существующим контролируемым механизмом.
+
+## `/run` и параллелизм
+
+Не запускайте MCP-вызовы параллельно автоматически.
+
+У вас задача имеет строгую последовательность, поэтому по умолчанию:
+
+```text
+один шаг
+→ один или несколько явно разрешённых вызовов
+→ результат
+→ обновление working memory
+→ следующий шаг
+```
+
+Параллельность можно добавить позже через специальную политику:
+
+```python
+ToolDescriptor(
+    ...
+    supports_parallel=False,
+)
+```
+
+И запускать параллельно только независимые read-only-инструменты. Записи, изменения файлов, GitHub issues, SQL mutations и подобные действия должны выполняться последовательно.
+
+## Хранение в `Store`
+
+Ваш `Store` уже является правильной точкой для добавления MCP-аудита. Не позволяйте `MCPGateway` напрямую писать JSON.
+
+Добавьте новые методы фасада:
+
+```python
+class Store:
+    def save_tool_catalog(self, user_id, catalog):
+        ...
+
+    def load_tool_catalog(self, user_id):
+        ...
+
+    def append_tool_audit(self, user_id, task_id, record):
+        ...
+
+    def load_tool_audit(self, user_id, task_id):
+        ...
+```
+
+Я бы разделил два файла:
+
+```text
+users/<id>/mcp_catalog.json
+tasks/<task>/tool_audit.jsonl
+```
+
+Или:
+
+```text
+users/<id>/integrations/mcp/
+├── servers.json
+└── catalog.json
+
+users/<id>/tasks/<task>/
+└── tool_audit.jsonl
+```
+
+Каталог серверов — user/application scope. История конкретного вызова — task scope.
+
+Не сохраняйте в `tool_audit` секреты и полные аргументы без маскирования.
+
+## Миграции
+
+У вас уже есть хорошая дисциплина миграций `task_state.json`. Используйте её и здесь.
+
+Например:
+
+```json
+{
+  "schema_version": 1,
+  "servers": {},
+  "catalog": [],
+  "updated_at": null
+}
+```
+
+Для `task_state.json` не стоит добавлять MCP-поля прямо в `TaskState`, если они не относятся к жизненному циклу задачи.
+
+Если нужна связь, добавьте только ссылку:
+
+```json
+{
+  "active_tool_execution_id": null
+}
+```
+
+Но лучше хранить состояние вызова в отдельном `tool_execution.json` или append-only журнале.
+
+## Аудит MCP и журнал переходов
+
+У вас уже есть:
+
+```text
+transition_log
+```
+
+Добавьте параллельный:
+
+```text
+tool_audit_log
+```
+
+Они должны оставаться отдельными.
+
+### `transition_log`
+
+```text
+from
+to
+allowed
+reason
+at
+```
+
+### `tool_audit_log`
+
+```text
+execution_id
+task_id
+stage
+tool_name
+provider
+arguments_hash
+policy_decision
+confirmation
+outcome
+duration_ms
+error_code
+at
+```
+
+Пример связи:
+
+```text
+transition_log:
+implementation → validation
+
+tool_audit_log:
+mcp.filesystem.write_file → succeeded
+```
+
+Но наличие успешного вызова само по себе не должно создавать запись о переходе.
+
+## Асинхронность и отказоустойчивость
+
+Ваш CLI сейчас синхронно выглядит как REPL, но MCP лучше построить асинхронно внутри, даже если наружный интерфейс пока синхронный.
+
+Варианты:
+
+### Вариант A — полностью async core
+
+```python
+asyncio.run(cli_main())
+```
+
+Наиболее чистый вариант для будущего.
+
+### Вариант B — async gateway за синхронным фасадом
+
+```python
+result = agent.run_tool(...)
+```
+
+Внутри используется event loop. Проще начать, но сложнее масштабировать.
+
+Для вашей архитектуры я рекомендую вариант A, потому что:
+
+- MCP transport сетевой или subprocess-based;
+- нужны timeout и cancellation;
+- несколько серверов могут работать независимо;
+- discovery и refresh можно выполнять в фоне;
+- длинный вызов не должен блокировать REPL.
+
+На уровне CLI можно оставить привычные команды:
+
+```text
+/mcp status
+/mcp servers
+/mcp tools
+/mcp refresh
+/mcp connect <server>
+/mcp disconnect <server>
+```
+
+Если MCP недоступен:
+
+```text
+MCP Gateway degraded
+```
+
+но:
+
+```text
+локальная память, профили и state machine продолжают работать
+```
+
+## Tool catalog и существующий токен-бюджет
+
+Ваш `PromptBuilder` уже умеет дозированную доставку и токен-бюджет. Это нужно распространить на описания MCP-инструментов.
+
+Не передавайте LLM весь каталог без ограничений:
+
+```text
+все инструменты сервера
+```
+
+Вместо этого:
+
+```text
+ToolRegistry.available_for(current_context)
+    ↓
+profile filter
+    ↓
+stage filter
+    ↓
+risk filter
+    ↓
+budget filter
+    ↓
+tools для LLM
+```
+
+Если инструментов много, нужен отдельный лимит:
+
+```python
+ToolPromptPolicy(
+    max_tools=30,
+    max_schema_tokens=6000,
+    include_descriptions=True,
+)
+```
+
+Это не просто оптимизация: большой каталог ухудшает выбор модели и увеличивает стоимость запроса.
+
+## Кэширование и атомарное обновление
+
+MCP-сервер может сообщить, что список инструментов изменился через `tools/list_changed` [1][3]. Поэтому:
+
+```text
+MCP connection
+  ↓
+discovery
+  ↓
+validate all schemas
+  ↓
+apply local policy
+  ↓
+build new catalog
+  ↓
+atomic registry swap
+```
+
+Не обновляйте `ToolRegistry` по одному инструменту. Иначе один запрос модели может увидеть половину старого и половину нового каталога.
+
+Рекомендуемая модель:
+
+```python
+@dataclass(frozen=True)
+class ToolCatalogSnapshot:
+    version: int
+    tools: tuple[ToolDescriptor, ...]
+    created_at: datetime
+```
+
+А реестр хранит текущий snapshot:
+
+```python
+self._current_snapshot: ToolCatalogSnapshot
+```
+
+При обновлении:
+
+```python
+new_snapshot = build_and_validate_snapshot()
+self._current_snapshot = new_snapshot
+```
+
+## Что делать с локальными инструментами
+
+У вас уже есть команды:
+
+```text
+/plan
+/approve
+/step
+/run
+/pause
+/resume
+/goto
+```
+
+Не обязательно превращать их в LLM-инструменты. Это могут оставаться CLI-командами с прямым вызовом методов агента.
+
+Но если в будущем вы захотите, чтобы LLM могла предложить контролируемые действия, можно зарегистрировать только безопасные доменные операции:
+
+```text
+local.request_plan
+local.request_validation
+local.summarize_task
+```
+
+Не регистрируйте напрямую:
+
+```text
+local.set_stage
+local.modify_task_state
+local.write_task_state_file
+```
+
+Иначе вы обойдёте ваши гарантии.
+
+## Что дать MCP-серверу в качестве прав
+
+У MCP может появиться доступ к файловой системе, API или базе. Поэтому не передавайте ему весь проектный контекст и все пути.
+
+Создайте `MCPServerConfig`:
+
+```python
+@dataclass(frozen=True)
+class MCPServerConfig:
+    server_id: str
+    transport: str
+    endpoint: str | None
+    command: tuple[str, ...] | None
+    enabled: bool
+    trust_level: str
+    allowed_tools: frozenset[str]
+    denied_tools: frozenset[str]
+    timeout_seconds: float
+    max_result_bytes: int
+```
+
+Для локального `stdio`-сервера дополнительно:
+
+```text
+working_directory
+environment_allowlist
+filesystem_roots
+```
+
+MCP поддерживает разные механизмы подключения и инструменты, но конкретный транспорт не должен попадать в бизнес-логику `den_N`; SDK клиента должен оставаться внутри интеграционного адаптера [2].
+
+## Тестовая стратегия
+
+Ваш тестовый контур — одно из главных преимуществ архитектуры. MCP не должен разрушить детерминированность тестов.
+
+### Unit-тесты без сети
+
+Создайте `FakeMCPTransport`:
+
+```python
+class FakeMCPTransport:
+    async def initialize(self):
+        ...
+
+    async def list_tools(self):
+        ...
+
+    async def call_tool(self, name, arguments):
+        ...
+```
+
+Проверяйте:
+
+- discovery;
+- пагинацию;
+- коллизии имён;
+- недоступный сервер;
+- timeout;
+- `is_error`;
+- невалидную JSON Schema;
+- обновление каталога;
+- отказ по стадии;
+- отказ по инварианту;
+- требование подтверждения;
+- запись аудита;
+- отсутствие записи в память после отказа;
+- отсутствие изменения `TaskStage`.
+
+### Интеграционные тесты
+
+Поднимайте локальный test MCP server через `stdio` или HTTP:
+
+```text
+fake server
+  ├── read_only_tool
+  ├── destructive_tool
+  ├── failing_tool
+  └── changing_catalog_tool
+```
+
+### Регрессионные тесты
+
+Ваши существующие 91 unit-тест и 35 acceptance-тестов должны продолжать запускаться без MCP:
+
+```text
+MCP disabled by default
+```
+
+Это принципиально важно. Новый функционал не должен менять старое поведение.
+
+## Как будет выглядеть DI-композиция
+
+Сейчас у вас есть `build_agent()`. Расширьте её опционально:
+
+```python
+def build_agent(config):
+    store = Store(config.storage)
+    memory = MemoryManager(store)
+    profile_router = ProfileRouter(store)
+    state_machine = StateMachine()
+    invariant_checker = RuleBasedChecker()
+
+    local_registry = build_local_tools(
+        state_machine=state_machine,
+        invariants=invariant_checker,
+    )
+
+    mcp_gateway = None
+    mcp_provider = None
+
+    if config.mcp_enabled:
+        mcp_gateway = MCPGateway(config.mcp, store)
+        mcp_provider = MCPToolProvider(mcp_gateway)
+
+    tool_registry = ToolRegistry()
+    tool_registry.add_provider(local_registry)
+
+    if mcp_provider is not None:
+        tool_registry.add_provider(mcp_provider)
+
+    tool_policy = ToolPolicy(config.tool_policy)
+
+    tool_executor = ToolExecutor(
+        registry=tool_registry,
+        policy=tool_policy,
+        invariant_checker=invariant_checker,
+        memory_manager=memory,
+        store=store,
+    )
+
+    return Agent(
+        memory=memory,
+        profile_router=profile_router,
+        state_machine=state_machine,
+        invariant_checker=invariant_checker,
+        tool_registry=tool_registry,
+        tool_executor=tool_executor,
+    )
+```
+
+При этом:
+
+```python
+mcp_enabled = False
+```
+
+должен оставаться значением по умолчанию на первом этапе разработки.
+
+## Как сдавать учебное задание и не переделывать архитектуру
+
+Для текущего задания можно сделать вертикальный срез на базе будущей архитектуры:
+
+```text
+MCPGateway
+  ↓
+MCPToolProvider.discover()
+  ↓
+ToolRegistry.refresh()
+  ↓
+/mcp tools
+```
+
+Скрипт отчёта может использовать тот же объект:
+
+```python
+async def main():
+    gateway = MCPGateway(config)
+    provider = MCPToolProvider(gateway)
+
+    await gateway.start()
+
+    tools = await provider.discover()
+
+    for tool in tools:
+        print(tool.qualified_name)
+        print(tool.description)
+        print(tool.input_schema)
+
+    await gateway.stop()
+```
+
+Это будет не одноразовый скрипт, а настоящий первый вертикальный срез будущей подсистемы. При этом `Agent`, память и state machine ещё не обязаны использовать MCP.
+
+## Приоритеты реализации
+
+Я бы реализовал в таком порядке.
+
+### Фаза 1: контракты
+
+```text
+ToolDescriptor
+ToolCallRequest
+ToolExecutionResult
+ToolProvider
+ToolExecutor
+```
+
+Без MCP SDK и сети.
+
+### Фаза 2: локальный fake provider
+
+Проверить, что `ToolRegistry` и `ToolExecutor` работают на заглушках.
+
+### Фаза 3: MCP discovery
+
+Подключение, `initialize`, `list_tools`, нормализация, каталог.
+
+### Фаза 4: policy pipeline
+
+Стадии, профили, инварианты, подтверждения.
+
+### Фаза 5: вызов MCP-инструментов
+
+Timeout, cancellation, ошибки, аудит.
+
+### Фаза 6: память
+
+Только нормализованные результаты и явная `MemoryPolicy`.
+
+### Фаза 7: CLI и фоновые обновления
+
+`/mcp status`, `/mcp tools`, `/mcp refresh`, reconnect.
+
+### Фаза 8: resources
+
+Отдельный контекстный провайдер, не смешанный с tools.
+
+## Финальная целевая схема
+
+```text
+                         ┌────────────────────┐
+                         │      Kod.py        │
+                         │  CLI / DI / REPL   │
+                         └─────────┬──────────┘
+                                   │
+                         ┌─────────▼──────────┐
+                         │       Agent        │
+                         │  orchestration     │
+                         └───┬─────┬─────┬────┘
+                             │     │     │
+              ┌──────────────▼┐ ┌──▼─────▼──────┐
+              │ PromptBuilder │ │ ToolRegistry  │
+              └───────────────┘ └──────┬────────┘
+                                        │
+                              ┌─────────▼─────────┐
+                              │   ToolExecutor    │
+                              │ policy + checks   │
+                              └──────┬─────┬──────┘
+                                     │     │
+                   ┌─────────────────▼┐ ┌──▼──────────────┐
+                   │ InvariantChecker │ │ StateMachine   │
+                   └──────────────────┘ └─────────────────┘
+                                     │
+                              ┌──────▼──────┐
+                              │ MCPGateway  │
+                              └──────┬──────┘
+                                     │
+                    ┌────────────────▼────────────────┐
+                    │       MCP servers               │
+                    │ filesystem / github / database  │
+                    └─────────────────────────────────┘
+
+       MemoryManager ← ToolResultPolicy ← ToolExecutor
+       Store         ← AuditRepository  ← ToolExecutor
+```
+
+## Итоговая оценка
+
+Ваша архитектура уже хорошо подготовлена для MCP: есть DI, строгие переходы, отдельные инварианты, фасад хранилища, четыре слоя памяти, профили и детерминированные заглушки. Поэтому MCP нужно добавлять не как новый «шестой фундаментальный слой», а как **интеграционный источник инструментов**, подключённый к универсальному `ToolRegistry` и защищённый существующими правилами.
+
+Самая удачная формула для `den_15`:
+
+```text
+MCP предоставляет инструменты.
+ToolRegistry каталогизирует.
+ToolPolicy фильтрует.
+InvariantChecker запрещает опасные действия.
+ToolExecutor управляет выполнением.
+MemoryPolicy решает, что запомнить.
+StateMachine решает, можно ли менять этап.
+Store сохраняет состояние и аудит.
+```
+
+Так вы получите расширяемую архитектуру, в которой добавление нового MCP-сервера не потребует изменений в `TaskStage`, `PromptBuilder`, профилях, памяти или существующем механизме переходов.
+

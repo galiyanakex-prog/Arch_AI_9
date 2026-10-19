@@ -1,0 +1,14 @@
+{
+  "id": "modeltest",
+  "profile_id": "default",
+  "name": "/model list",
+  "style": {
+    "answers": "/model status"
+  },
+  "constraints": {
+    "answers": "/model use lmstudio:Qwen2.5-Coder-3B-Instruct-Distill-Qwen3-Coder-Next-abliterated-Q6_K"
+  },
+  "context": {
+    "answers": "/model status"
+  }
+}

@@ -1,0 +1,19 @@
+[live] enabled-серверы: ['time', 'weather', 'scheduler', 'pipeline']
+[MCP] «time»: подключён (READY)
+[MCP] «weather»: подключён (READY)
+[MCP] «scheduler»: подключён (READY)
+[MCP] «pipeline»: подключён (READY)
+[live] каталог: ['mcp.pipeline.readFile', 'mcp.pipeline.saveToFile', 'mcp.pipeline.search', 'mcp.pipeline.summarize', 'mcp.scheduler.get_summary', 'mcp.scheduler.latest_summary', 'mcp.scheduler.list_jobs', 'mcp.scheduler.record_observation', 'mcp.scheduler.run_due', 'mcp.scheduler.schedule_collection', 'mcp.scheduler.schedule_reminder', 'mcp.time.get_time', 'mcp.weather.get_forecast_metadata', 'mcp.weather.get_weather_forecast', 'mcp.weather.search_locations']
+[live] ответ: [scripted] длинный флоу (живой VPS) завершён
+[live] порядок вызовов:
+    mcp.time.get_time → succeeded (103 мс)
+    mcp.pipeline.search → succeeded (73 мс)
+    mcp.pipeline.summarize → succeeded (1096 мс)
+    mcp.pipeline.saveToFile → succeeded (66 мс)
+    mcp.scheduler.schedule_reminder → succeeded (1077 мс)
+[live] всего вызовов: 5
+[MCP] «time»: отключён
+[MCP] «weather»: отключён
+[MCP] «scheduler»: отключён
+[MCP] «pipeline»: отключён
+LIVE D3 OK: порядок и маршрутизация подтверждены на VPS

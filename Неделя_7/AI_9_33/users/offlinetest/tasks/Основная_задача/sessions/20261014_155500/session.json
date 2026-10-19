@@ -1,0 +1,124 @@
+{
+  "messages": [
+    {
+      "content": "как запретить агенту менять технологический стек проекта",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M1",
+      "id": "M1",
+      "parent_id": null,
+      "role": "user",
+      "created_at": "2026-10-14 15:55:00"
+    },
+    {
+      "content": "[rag]\nНайденные источники (отвечай строго по ним):\n1. [5a49d570c6b338ecba6da557162e1dad2887c499#5a49d570c6b338ecba6da557162e1dad2887c499#0] core/invariants.py · invariants · раздел: -*- coding: utf-8 -*-\n    # -*- coding: utf-8 -*- \"\"\"Инварианты и ограничения состояния (День 14). Неизменяемые правила, которые агент не имеет права нарушать (канон `Задание_Д14.txt`, целевое состояние `arch_den_14.md` §2.2–2.4, §2.10): * Invariant — одно правило (id, description, category, severity, active); * ConstraintSet — набор правил — ОТДЕЛЬНАЯ сущность (не память, не профиль, не история диалога); хранится своим файлом и переживает очистку истории и перезапуск процесса; * ProposedAction — предлагаемое действие, которое проверяется кодом; * InvariantChecker — интерфейс (ABC) + RuleBasedChecker: детерминированная проверка действия ДО изменения состояния/запуска инструмента; * update_invariant — изменение правил\n2. [5a49d570c6b338ecba6da557162e1dad2887c499#5a49d570c6b338ecba6da557162e1dad2887c499#7] core/invariants.py · invariants · раздел: Известные технологии/языки — для детерминированной проверки по id-неймспейсу.\n    Обычная фраза в диалоге («а давай теперь на FastAPI») не меняет правило: без authorized=True поднимается PermissionError (канон `Задание_Д14.txt`). \"\"\" if not authorized: raise PermissionError( \"Изменение инвариантов требует отдельного подтверждения.\") inv = constraints.by_id(invariant_id) if inv is None: raise KeyError(f\"Инвариант не найден: {invariant_id}\") inv.description = new_description\n3. [b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#25] dev/Проверка.md · Проверка · раздел: Проверка_2.md — короткий сценарий ручной проверки (день 20, живой прогон) > Сцен\n\n⚠ [RAG] Ответ не полностью подтверждён найденными источниками — проверьте утверждения, помеченные ссылками.",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M1a",
+      "id": "M2",
+      "parent_id": "M1",
+      "role": "assistant",
+      "created_at": "2026-10-14 15:59:22"
+    },
+    {
+      "content": "единый интерфейс для всех видов памяти агента",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M2",
+      "id": "M3",
+      "parent_id": "M2",
+      "role": "user",
+      "created_at": "2026-10-14 15:59:22"
+    },
+    {
+      "content": "**Интерфейс MemoryLayer (ABC)**\n\n```python\nfrom abc import ABC, abstractmethod\n\nclass MemoryLayer(ABC):\n    @abstractmethod\n    def remember(self, content: str, **kwargs) -> None:\n        \"\"\"Запомнить контент в памяти.\"\"\"\n    \n    @abstractmethod\n    def recall(self, query: str, **kwargs) -> list[dict]:\n        \"\"\"Получить данные из памяти по запросу.\"\"\"\n    \n    @abstractmethod\n    def clear(self, **kwargs) -> None:\n        \"\"\"Очистить всю память.\"\"\"\n```\n\n**Интерфейс MemoryManager**\n\n```python\nfrom typing import List\n\nclass MemoryManager:\n    def __init__(self):\n        self.layers: List[MemoryLayer] = []\n    \n    def add_layer(self, layer: MemoryLayer) -> None:\n        \"\"\"Добавить слой памяти.\"\"\"\n        self.layers.append(layer)\n    \n    def remove_layer(self, layer: MemoryLayer) -> None:\n        \"\"\"Удалить слой памяти.\"\"\"\n        self.layers.remove(layer)\n    \n    def remember(self, content: str, **kwargs) -> None:\n        \"\"\"Запомнить контент во всех слоях.\"\"\"\n        for layer in self.layers:\n            layer.remember(content, **kwargs)\n    \n    def recall(self, query: str, **kwargs) -> List[dict]:\n        \"\"\"Получить данные из всех слоев по запросу.\"\"\"\n        results = []\n        for layer in self.layers:\n            results.extend(layer.recall(query, **kwargs))\n        return results\n    \n    def clear(self, **kwargs) -> None:\n        \"\"\"Очистить все слои памяти.\"\"\"\n        for layer in self.layers:\n            layer.clear(**kwargs)\n```\n\n**Пример реализации ShortTermMemory**\n\n```python\nclass ShortTermMemory(MemoryLayer):\n    def __init__(self, capacity: int = 100):\n        self.capacity = capacity\n        self.data = []\n    \n    def remember(self, content: str, **kwargs) -> None:\n        if len(self.data) >= self.capacity:\n            self.data.pop(0)\n        self.data.append({\"content\": content, \"timestamp\": datetime.now()})\n    \n    def recall(self, query: str, **kwargs) -> List[dict]:\n        return [item for item in self.data if query.lower() in item[\"content\"].lower()]\n    \n    def clear(self, **kwargs) -> None:\n        self.data.clear()\n```\n\n**Пример использования**\n\n```python\nfrom datetime import datetime\n\n# Создание слоев памяти\nshort_term = ShortTermMemory(capacity=10)\nworking = WorkingMemory()\nlong_term = LongTermMemory()\n\n# Создание менеджера памяти\nmemory_manager = MemoryManager()\nmemory_manager.add_layer(short_term)\nmemory_manager.add_layer(working)\nmemory_manager.add_layer(long_term)\n\n# Запоминание данных\nmemory_manager.remember(\"Запись 1\")\nmemory_manager.remember(\"Запись 2\")\n\n# Получение данных\nresults = memory_manager.recall(\"запись\")\nprint(results)  # [{'content': 'Запись 1', 'timestamp': ...}, {'content': 'Запись 2', 'timestamp': ...}]\n\n# Очистка п",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M2a",
+      "id": "M4",
+      "parent_id": "M3",
+      "role": "assistant",
+      "created_at": "2026-10-14 16:01:51"
+    },
+    {
+      "content": "как устроен реестр моделей",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M3",
+      "id": "M5",
+      "parent_id": "M4",
+      "role": "user",
+      "created_at": "2026-10-14 16:01:51"
+    },
+    {
+      "content": "**Реестр моделей агента:**\n\n1. **Схема базы данных:** \n   - `models` таблица (id, name, description, type, version, status, created_at)\n   - `model_versions` таблица (id, model_id, version, hash, size, timestamp)\n\n2. **Структура объекта модели:**\n   ```python\n   {\n       \"id\": \"bge-m3\",\n       \"name\": \"BGE-M3\",\n       \"description\": \"Большая генеративная модель для бизнес-задач\",\n       \"type\": \"text-generation\",\n       \"version\": \"1.2.3\",\n       \"status\": \"active\",\n       \"created_at\": \"2026-10-05T14:30:00Z\",\n       \"versions\": [\n           {\n               \"version\": \"1.2.3\",\n               \"hash\": \"db63ce0832be10d6e3ac0eb18696bc4f8a9198d7\",\n               \"size\": 500MB,\n               \"timestamp\": \"2026-10-05T14:30:00Z\"\n           },\n           {\n               \"version\": \"1.2.4\",\n               \"hash\": \"579ae9ac0dc8d21986355ff085e0b7e67d1c9569\",\n               \"size\": 510MB,\n               \"timestamp\": \"2026-10-10T14:30:00Z\"\n           }\n       ]\n   }\n   ```\n\n3. **Основные поля таблицы `models`:**\n   - `id` (UUID): уникальный идентификатор модели\n   - `name`: название модели\n   - `description`: краткое описание\n   - `type`: тип модели (text-generation, summarization, translation)\n   - `version`: версия модели\n   - `status`: статус (active, deprecated, archived)\n   - `created_at`: дата создания\n\n4. **Основные поля таблицы `model_versions`:**\n   - `id` (UUID): уникальный идентификатор версии\n   - `model_id`: внешний ключ на модель\n   - `version`: версия модели\n   - `hash`: хеш-значение (MD5, SHA256)\n   - `size`: размер файла\n   - `timestamp`: дата создания\n\n5. **Основные операции:**\n   - Добавление новой модели: `INSERT INTO models`\n   - Обновление информации о модели: `UPDATE models SET description = '...' WHERE id = ...`\n   - Получение списка моделей: `SELECT * FROM models`\n   - Получение детальной информации о модели: `SELECT * FROM models WHERE id = ...`\n   - Удаление модели: `DELETE FROM models WHERE id = ...`\n\n6. **Дополнительные таблицы (возможно):**\n   - `model_aliases`: для хранения алиасов и синоним",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M3a",
+      "id": "M6",
+      "parent_id": "M5",
+      "role": "assistant",
+      "created_at": "2026-10-14 16:04:51"
+    },
+    {
+      "content": "какие инварианты есть у агента",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M4",
+      "id": "M7",
+      "parent_id": "M6",
+      "role": "user",
+      "created_at": "2026-10-14 16:04:51"
+    },
+    {
+      "content": "**Инварианты агента:**\n\n1. **Инвариант 1:** \"Агент не может изменять технологический стек проекта без предварительного согласия.\"\n   - Идентификатор: `framework.no-change`\n   - Описание: \"Запрет на добавление или удаление фреймворков без согласования с командой.\"\n   - Категория: \"Технологии\"\n   - Степень важности: высокая\n   - Активен: да\n\n2. **Инвариант 2:** \"Агент не может изменять базу данных без предварительного согласования с командой.\"\n   - Идентификатор: `database.no-change`\n   - Описание: \"Запрет на добавление или удаление таблиц и структуры базы данных без согласования с командой.\"\n   - Категория: \"База данных\"\n   - Степень важности: высокая\n   - Активен: да\n\n3. **Инвариант 3:** \"Агент не может изменять версию Python проекта без предварительного согласования с командой.\"\n   - Идентификатор: `python.no-change`\n   - Описание: \"Запрет на добавление или удаление версий Python без согласования с командой.\"\n   - Категория: \"Python\"\n   - Степень важности: высокая\n   - Активен: да\n\n4. **Инвариант 4:** \"Агент не может изменять версию Node.js проекта без предварительного согласования с командой.\"\n   - Идентификатор: `nodejs.no-change`\n   - Описание: \"Запрет на добавление или удаление версий Node.js без согласования с командой.\"\n   - Категория: \"Node.js\"\n   - Степень важности: высокая\n   - Активен: да\n\n5. **Инвариант 5:** \"Агент не может изменять версию Docker образа проекта без предварительного согласования с командой.\"\n   - Идентификатор: `docker.no-change`\n   - Описание: \"Запрет на добавление или удаление версий Docker образов без согласования с командой.\"\n   - Категория: \"Docker\"\n   - Степень важности: высокая\n   - Активен: да\n\n6. **Инвариант 6:** \"Агент не может изменять версию Git репозитория проекта без предварительного согласования с командой.\"\n   - Идентификатор: `git.no-change`\n   - Описание: \"Запрет на добавление или удаление версий Git репозитория без согласования с командой.\"\n   - Категория: \"Git\"\n   - Степень важности: высокая\n   - Активен: да\n\n7. **Инвариант 7:** \"Агент не может изменять версию Python би",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M4a",
+      "id": "M8",
+      "parent_id": "M7",
+      "role": "assistant",
+      "created_at": "2026-10-14 16:08:25"
+    },
+    {
+      "content": "как работает краткосрочная память",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M5",
+      "id": "M9",
+      "parent_id": "M8",
+      "role": "user",
+      "created_at": "2026-10-14 16:08:25"
+    },
+    {
+      "content": "Краткосрочная память (Short-Term Memory) — это временная область, предназначенная для хранения информации, которая необходима в текущем контексте и может быть использована для решения текущей задачи. Она обычно связана с:\n\n1. **Текущим диалогом:** Краткосрочная память содержит последнее сообщение пользователя, предыдущие ответы агента, и текущий запрос пользователя.\n\n2. **Контекстные данные:** Информация о предыдущих задачах, истории диалога, важных моментах или фактах, которые могут быть полезны для решения текущей проблемы.\n\n3. **Многозадачность:** Краткосрочная память позволяет агенту решать несколько задач одновременно, сохраняя информацию о каждой задаче в отдельной области.\n\n4. **Темп обновления:** Информация в краткосрочной памяти обновляется быстро (обычно секунды-минуты), что позволяет агенту реагировать на изменения и корректировать своё поведение.\n\n5. **Ограничения:** Краткосрочная память имеет ограниченную емкость и время жизни, обычно не более нескольких минут. Она не сохраняет информацию между сессиями или при перезапуске агента.\n\n6. **Использование в агентских системах:** Обычно реализуется как часть слоя памяти (MemoryLayer), который может хранить данные в различных форматах (текст, бинарные данные, метаданные) и обеспечивать интерфейс для чтения и записи.",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M5a",
+      "id": "M10",
+      "parent_id": "M9",
+      "role": "assistant",
+      "created_at": "2026-10-14 16:13:02"
+    }
+  ]
+}

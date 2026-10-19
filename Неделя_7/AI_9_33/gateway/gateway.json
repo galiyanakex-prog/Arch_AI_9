@@ -1,0 +1,10 @@
+{
+  "_comment": "Шлюз на VPS. Пароли — только хэши в БД. Секреты запрещены (env GATEWAY_SECRET или автосекрет gateway/.secret).",
+  "_limits_note": "Rate-limit — in-memory (окно 60 с, счётчик на процесс, сбрасывается при рестарте шлюза; решение №25).",
+  "host_facade_url": "http://127.0.0.1:8090",
+  "facade_timeout_seconds": 180,
+  "public_port": 8080,
+  "limits": {"requests_per_minute": 6, "max_query_chars": 8000},
+  "session": {"secret_env": "GATEWAY_SECRET", "secret_file": "gateway/.secret", "max_age_minutes": 720},
+  "history_keep_messages": 200
+}

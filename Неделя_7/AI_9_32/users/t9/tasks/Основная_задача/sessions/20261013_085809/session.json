@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "content": "привет",
+      "source": "user",
+      "scope": "session",
+      "owner": "__t9",
+      "visibility": "private",
+      "source_message_id": "M1",
+      "id": "M1",
+      "parent_id": null,
+      "role": "user",
+      "created_at": "2026-10-13 08:58:09"
+    },
+    {
+      "content": "[Mock] вижу 6 сообщений: system:Ты полезный ассистент с явной моделью памяти. Отвечай кратко на русском языке, у || system:[profile]\nПрофиль: __t9 (default)\nИмя: __t9\nСтиль: answers: \nОграничения: answer || system:[long_term]\nПрофиль: ссылка users/__t9/profile.json\nЗадача: Основная_задача || system:[working]\nЗадача: Первая задача (по смыслу первой сессии)\nСтадия задачи: new || user:привет || user:привет",
+      "source": "model",
+      "scope": "session",
+      "owner": "__t9",
+      "visibility": "private",
+      "source_message_id": "M1a",
+      "id": "M2",
+      "parent_id": "M1",
+      "role": "assistant",
+      "created_at": "2026-10-13 08:58:09"
+    }
+  ]
+}

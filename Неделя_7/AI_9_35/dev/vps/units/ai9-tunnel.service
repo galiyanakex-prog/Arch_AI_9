@@ -1,0 +1,43 @@
+# ai9-tunnel.service — SSH reverse tunnel: VPS:8090 → хост:8090 (этап 10, S2).
+#
+# ⚠ ЭТОТ ЮНИТ СТАВИТСЯ НА ХОСТ (домашнюю машину), а НЕ на VPS.
+#   Он НЕ входит в dev/vps/services.list (тот список — для VPS). Установка:
+#     cp dev/vps/units/ai9-tunnel.service ~/.config/systemd/user/
+#     systemctl --user daemon-reload && systemctl --user enable --now ai9-tunnel
+#
+# Смысл: хост САМ держит исходящий SSH-канал к VPS и пробрасывает свой фасад
+# (127.0.0.1:8090) на loopback VPS (127.0.0.1:8090). Шлюз на VPS обращается к
+# фасаду по http://127.0.0.1:8090. Проброс портов на роутере НЕ нужен; WireGuard
+# НЕ применяется (решение №12). Проброшенный порт слушает ТОЛЬКО loopback VPS —
+# фасад напрямую из интернета недоступен; публичен лишь веб-порт шлюза :8080.
+#
+# Авторестарт: упал канал — systemd поднимет его сам (Restart=always).
+#
+# ⚠ ControlMaster=no / ControlPath=none — ОБЯЗАТЕЛЬНО.
+#   В ~/.ssh/config для Host mcp-vps включён `ControlMaster auto` (общий
+#   мультиплексированный канал). Если туннель подключится к уже существующему
+#   master, forward зарегистрируется на нём, а сам процесс ssh сразу завершится
+#   (status=0) → systemd зациклит рестарт, порт 8090 не поднимется. Поэтому
+#   туннелю нужна СОБСТВЕННАЯ выделенная сессия: ControlMaster=no, ControlPath=none.
+
+[Unit]
+Description=AI_9 reverse tunnel to VPS (facade 8090)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -NT \
+    -o ControlMaster=no \
+    -o ControlPath=none \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o BatchMode=yes \
+    -R 127.0.0.1:8090:127.0.0.1:8090 \
+    mcp-vps
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

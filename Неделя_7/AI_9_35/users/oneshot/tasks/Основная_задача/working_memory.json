@@ -1,0 +1,15 @@
+{
+  "description": "Первая задача (по смыслу первой сессии)",
+  "refs": [],
+  "lifecycle_summary": "",
+  "decisions": [],
+  "constraints": [
+    {
+      "text": "код.",
+      "source_message_id": ""
+    }
+  ],
+  "facts": [],
+  "open_questions": [],
+  "current_state": "new"
+}

@@ -1,0 +1,14 @@
+{
+  "id": "facade_iv",
+  "profile_id": "default",
+  "name": "Тест",
+  "style": {
+    "answers": "краткий"
+  },
+  "constraints": {
+    "answers": ""
+  },
+  "context": {
+    "answers": ""
+  }
+}

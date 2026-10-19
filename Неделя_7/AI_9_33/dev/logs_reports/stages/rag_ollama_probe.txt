@@ -1,0 +1,26 @@
+# rag_ollama_probe.txt — живой probe локального сервиса эмбеддингов (Ревизия 7, этап 1)
+
+Дата: 2026-10-05
+
+## systemctl is-active ollama
+active
+
+## ss -ltnp | grep 11434
+LISTEN 0      4096                  127.0.0.1:11434      0.0.0.0:*
+
+## curl http://127.0.0.1:11434/api/version
+{"version":"0.35.1"}
+
+## ollama list | grep bge-m3
+bge-m3:latest    790764642607    1.2 GB    28 hours ago
+
+## probe POST /api/embed {"model":"bge-m3","input":["тест","второй текст"]}
+векторов: 2 | dim = 1024 | первые 3: [-0.0067, 0.0396, -0.0328]
+OK: /api/embed вернул 2 вектора длиной 1024
+
+## ND/models/bge-m3_params.md — разделы
+Эндпоинты API / Параметры / Отличия от чат-моделей — присутствуют (3 совпадения).
+
+## .env.example
+OLLAMA_EMBED_URL=http://127.0.0.1:11434
+OLLAMA_EMBED_MODEL=bge-m3

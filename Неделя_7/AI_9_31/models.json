@@ -1,0 +1,41 @@
+{
+  "_comment": "Реестр LLM-моделей. Секреты запрещены: API_KEY только в окружении.",
+  "current": "cloud:stepfun/step-3.5-flash",
+  "profiles": {
+    "default": {},
+    "rag-strict": {"temperature": 0.1, "max_tokens": 700, "context_window": 8192, "top_p": 0.9},
+    "fast": {"temperature": 0.3, "max_tokens": 256, "context_window": 4096, "top_p": 0.9}
+  },
+  "models": [
+    {"id": "cloud:stepfun/step-3.5-flash", "service": "cloud", "local": false,
+     "model": "stepfun/step-3.5-flash", "context_window": 262144, "profile": "default"},
+    {"id": "lmstudio:Qwen2.5-Coder-3B-Instruct-Distill-Qwen3-Coder-Next-abliterated-Q6_K",
+     "service": "lmstudio", "local": true,
+     "model": "qwen2.5-coder-3b-instruct-distill-qwen3-coder-next-abliterated",
+     "base_url": "http://127.0.0.1:1234",
+     "quant": "Q6_K", "context_window": 8192, "profile": "rag-strict",
+     "label": "lmstudio/Qwen2.5-Coder-3B-Instruct-Distill-Qwen3-Coder-Next-abliterated-Q6_K",
+     "timeout_seconds": 600},
+    {"id": "lmstudio:qwen/qwen2.5-coder-14b",
+     "service": "lmstudio", "local": true,
+     "model": "qwen/qwen2.5-coder-14b",
+     "base_url": "http://127.0.0.1:1234",
+     "quant": "Q4_K_M", "context_window": 8192, "profile": "rag-strict",
+     "label": "lmstudio/qwen2.5-coder-14b-Q4_K_M",
+     "timeout_seconds": 1200},
+    {"id": "lmstudio:codellama-7b-python",
+     "service": "lmstudio", "local": true,
+     "model": "codellama-7b-python",
+     "base_url": "http://127.0.0.1:1234",
+     "quant": "Q3_K_S", "context_window": 8192, "profile": "rag-strict",
+     "label": "lmstudio/codellama-7b-python-Q3_K_S",
+     "timeout_seconds": 1200},
+    {"id": "ollama:bge-m3", "service": "ollama", "local": true,
+     "model": "bge-m3:latest", "base_url": "http://127.0.0.1:11434",
+     "role": "embedding", "context_window": 8192, "profile": "default",
+     "timeout_seconds": 60, "keep_alive": "10m"},
+    {"id": "mock", "service": "mock", "local": true, "model": "Mock", "profile": "default"}
+  ],
+  "subagents": {"max_parallel": 2, "timeout_seconds": 180, "default_service": "lmstudio",
+                "user_prefix": "sub_"}
+}

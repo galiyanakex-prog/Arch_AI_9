@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI_9 — знакомство</title>
+  <style>
+    :root { --bg:#0f1115; --card:#1a1e26; --fg:#e8eaed; --muted:#9aa0a6;
+            --accent:#8ab4f8; --err:#f28b82; --border:#2a2f3a; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+           background:var(--bg); color:var(--fg); display:flex; align-items:center;
+           justify-content:center; min-height:100vh; padding:16px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:16px;
+            padding:32px; width:100%; max-width:520px; box-shadow:0 8px 32px rgba(0,0,0,.4); }
+    h1 { margin:0 0 4px; font-size:22px; font-weight:600; }
+    .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+    label { display:block; font-size:13px; color:var(--muted); margin:16px 0 6px; }
+    input, textarea { width:100%; padding:12px 14px; border-radius:10px;
+            border:1px solid var(--border); background:#12151c; color:var(--fg);
+            font-size:15px; outline:none; font-family:inherit; resize:vertical; }
+    input:focus, textarea:focus { border-color:var(--accent); }
+    button { width:100%; margin-top:24px; padding:12px; border:none; border-radius:10px;
+             background:var(--accent); color:#10131a; font-size:15px; font-weight:600;
+             cursor:pointer; }
+    button:hover { filter:brightness(1.08); }
+    .error { background:rgba(242,139,130,.12); color:var(--err); border:1px solid
+             rgba(242,139,130,.3); border-radius:10px; padding:10px 12px; font-size:13px;
+             margin-bottom:8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Знакомство</h1>
+    <div class="sub">Три вопроса — чтобы агент подстроился под вас</div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if questions %}
+    <form method="post" action="{{ url_for('interview') }}">
+      <label for="name">Ваше имя</label>
+      <input id="name" name="name" autofocus>
+      {% for key, question in questions %}
+      <label for="{{ key }}">{{ question }}</label>
+      <textarea id="{{ key }}" name="{{ key }}" rows="2"></textarea>
+      {% endfor %}
+      <button type="submit">Начать работу</button>
+    </form>
+    {% endif %}
+  </div>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# ai9-gateway.service — пользовательский юнит шлюза AI_9 на VPS (:8080).
+# Этап 10 (S2). Деплой — dev/vps/deploy_services.sh (запускается НА VPS, без sudo).
+#
+# WorkingDirectory = корень AI_9, чтобы `-m gateway.app` нашёл пакет.
+# ExecStart = ОТДЕЛЬНЫЙ venv шлюза (/home/t/doc/.venv) — не общий MCP-venv
+#   (решение №23). MCP-юниты остаются на /home/t/doc/mcp/ai9 и не трогаются.
+#   В venv шлюза должны стоять flask И requests (решение №24).
+# EnvironmentFile = .env (может содержать GATEWAY_SECRET); `-` — файл необязателен.
+#   Если GATEWAY_SECRET не задан, шлюз сгенерирует автосекрет в gateway/.secret
+#   (решение №27).
+# Порт 8080 — единственный публичный порт новой подсистемы (решение №22);
+# MCP :8000/:8010/:8020 не трогаются (решение №18).
+
+[Unit]
+Description=AI_9 gateway (Flask :8080)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/t/doc/AI_9
+ExecStart=/home/t/doc/.venv/bin/python -m gateway.app
+Restart=always
+RestartSec=3
+Environment=GATEWAY_HOST=0.0.0.0
+Environment=GATEWAY_PORT=8080
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/t/doc/AI_9/.env
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,1839 @@
+Ниже даю **полный чистый код всех основных файлов** без многоточий, в согласованном виде под `python-stack`, `settings`, SQLite и Ollama embeddings. Pydantic Settings удобно читать из `.env`, а pytest по умолчанию подхватывает тесты из `test_*.py`. [1][2]
+
+## `pyproject.toml`
+```toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-doc-index"
+version = "0.1.0"
+description = "Local document indexing and retrieval for RAG with Ollama embeddings and SQLite"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Your Name" }
+]
+dependencies = [
+  "ollama>=0.4.0",
+  "pydantic>=2.8.2",
+  "pydantic-settings>=2.3.4",
+  "python-dotenv>=1.0.1",
+  "numpy>=1.26.4",
+  "tqdm>=4.66.5",
+  "beautifulsoup4>=4.12.3",
+  "markdown>=3.6",
+  "pymupdf>=1.24.9"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.2",
+  "ruff>=0.6.2",
+  "mypy>=1.11.2"
+]
+
+[project.scripts]
+rag-index = "rag_index.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+```
+
+## `src/rag_index/__init__.py`
+```python
+__all__ = []
+```
+
+## `src/rag_index/config.py`
+```python
+from __future__ import annotations
+
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    app_name: str = "rag-doc-index"
+    data_dir: Path = Path("data")
+    raw_dir: Path = Path("data/raw")
+    processed_dir: Path = Path("data/processed")
+    index_dir: Path = Path("data/index")
+    db_path: Path = Path("data/index/rag.db")
+
+    ollama_host: str = Field(default="http://localhost:11434")
+    embedding_model: str = Field(default="embeddinggemma")
+
+    chunk_strategy: str = Field(default="fixed_size")
+    fixed_chunk_size: int = Field(default=1000)
+    fixed_chunk_overlap: int = Field(default=150)
+    structured_max_chunk_size: int = Field(default=1200)
+    structured_overlap_tail_chars: int = Field(default=120)
+
+    top_k: int = Field(default=5)
+
+
+settings = Settings()
+```
+
+## `src/rag_index/logging_config.py`
+```python
+from __future__ import annotations
+
+import logging
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+```
+
+## `src/rag_index/models/__init__.py`
+```python
+__all__ = []
+```
+
+## `src/rag_index/models/embeddings.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Sequence
+
+
+@dataclass(frozen=True)
+class EmbeddingVector:
+    values: list[float] = field(default_factory=list)
+
+    @property
+    def dim(self) -> int:
+        return len(self.values)
+
+    def to_list(self) -> list[float]:
+        return list(self.values)
+
+    @classmethod
+    def from_sequence(cls, seq: Sequence[float]) -> "EmbeddingVector":
+        return cls(values=[float(x) for x in seq])
+```
+
+## `src/rag_index/models/ollama_client.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable
+
+import ollama
+
+from rag_index.config import settings
+
+
+@dataclass(frozen=True)
+class OllamaEmbeddingClient:
+    model: str = settings.embedding_model
+    host: str = settings.ollama_host
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_client", ollama.Client(host=self.host))
+
+    def embed_one(self, text: str) -> list[float]:
+        response = self._client.embed(model=self.model, input=text)
+        return list(response["embeddings"][0])
+
+    def embed_many(self, texts: Iterable[str]) -> list[list[float]]:
+        items = list(texts)
+        if not items:
+            return []
+        response = self._client.embed(model=self.model, input=items)
+        return [list(vec) for vec in response["embeddings"]]
+```
+
+## `src/rag_index/loaders/__init__.py`
+```python
+__all__ = []
+```
+
+## `src/rag_index/loaders/base.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class LoadedDocument:
+    doc_id: str
+    source: str
+    title: str
+    path: str
+    doc_type: str
+    text: str
+
+
+class DocumentLoader(Protocol):
+    def load(self, path: str | Path) -> LoadedDocument:
+        ...
+```
+
+## `src/rag_index/loaders/markdown_loader.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from rag_index.loaders.base import LoadedDocument
+
+
+@dataclass
+class MarkdownLoader:
+    def load(self, path: str | Path) -> LoadedDocument:
+        p = Path(path)
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        return LoadedDocument(
+            doc_id=str(p.resolve()),
+            source=str(p),
+            title=p.stem,
+            path=str(p),
+            doc_type="markdown",
+            text=text,
+        )
+```
+
+## `src/rag_index/loaders/code_loader.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from rag_index.loaders.base import LoadedDocument
+
+
+@dataclass
+class CodeLoader:
+    def load(self, path: str | Path) -> LoadedDocument:
+        p = Path(path)
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        return LoadedDocument(
+            doc_id=str(p.resolve()),
+            source=str(p),
+            title=p.stem,
+            path=str(p),
+            doc_type=p.suffix.lstrip(".").lower() or "code",
+            text=text,
+        )
+```
+
+## `src/rag_index/loaders/pdf_loader.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import fitz
+
+from rag_index.loaders.base import LoadedDocument
+
+
+@dataclass
+class PdfLoader:
+    def load(self, path: str | Path) -> LoadedDocument:
+        p = Path(path)
+        text_parts: list[str] = []
+
+        doc = fitz.open(str(p))
+        try:
+            for page in doc:
+                text_parts.append(page.get_text("text"))
+        finally:
+            doc.close()
+
+        text = "\n".join(text_parts)
+        return LoadedDocument(
+            doc_id=str(p.resolve()),
+            source=str(p),
+            title=p.stem,
+            path=str(p),
+            doc_type="pdf",
+            text=text,
+        )
+```
+
+## `src/rag_index/chunking/__init__.py`
+```python
+__all__ = []
+```
+
+## `src/rag_index/chunking/base.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class Chunk:
+    chunk_id: str
+    doc_id: str
+    strategy: str
+    section: str | None
+    chunk_index: int
+    text: str
+    char_len: int
+    token_len: int | None = None
+
+
+class Chunker(Protocol):
+    strategy_name: str
+
+    def chunk(self, doc_id: str, text: str, title: str | None = None) -> list[Chunk]:
+        ...
+```
+
+## `src/rag_index/chunking/fixed_size.py`
+```python
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from uuid import uuid4
+
+from rag_index.chunking.base import Chunk
+
+
+@dataclass
+class FixedSizeChunker:
+    chunk_size: int = 1000
+    overlap: int = 150
+    strategy_name: str = "fixed_size"
+
+    def chunk(self, doc_id: str, text: str, title: str | None = None) -> list[Chunk]:
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        if not cleaned:
+            return []
+
+        step = max(1, self.chunk_size - self.overlap)
+        chunks: list[Chunk] = []
+
+        start = 0
+        idx = 0
+        while start < len(cleaned):
+            end = min(len(cleaned), start + self.chunk_size)
+            piece = cleaned[start:end].strip()
+            if piece:
+                chunks.append(
+                    Chunk(
+                        chunk_id=str(uuid4()),
+                        doc_id=doc_id,
+                        strategy=self.strategy_name,
+                        section=title,
+                        chunk_index=idx,
+                        text=piece,
+                        char_len=len(piece),
+                        token_len=None,
+                    )
+                )
+                idx += 1
+            if end >= len(cleaned):
+                break
+            start += step
+
+        return chunks
+```
+
+## `src/rag_index/chunking/structured.py`
+```python
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from uuid import uuid4
+
+from rag_index.chunking.base import Chunk
+
+
+@dataclass
+class StructuredChunker:
+    max_chunk_size: int = 1200
+    overlap_tail_chars: int = 120
+    strategy_name: str = "structured"
+
+    heading_pattern: re.Pattern[str] = re.compile(
+        r"^(#{1,6}\s+.+|[A-ZА-Я0-9][^\n]{0,120}:)$",
+        re.MULTILINE,
+    )
+
+    def chunk(self, doc_id: str, text: str, title: str | None = None) -> list[Chunk]:
+        text = text.strip()
+        if not text:
+            return []
+
+        blocks = self._split_by_headings(text)
+        chunks: list[Chunk] = []
+        idx = 0
+
+        for section, block in blocks:
+            for piece in self._split_block(block, self.max_chunk_size):
+                cleaned = piece.strip()
+                if not cleaned:
+                    continue
+                chunks.append(
+                    Chunk(
+                        chunk_id=str(uuid4()),
+                        doc_id=doc_id,
+                        strategy=self.strategy_name,
+                        section=section or title,
+                        chunk_index=idx,
+                        text=cleaned,
+                        char_len=len(cleaned),
+                        token_len=None,
+                    )
+                )
+                idx += 1
+
+        return chunks
+
+    def _split_by_headings(self, text: str) -> list[tuple[str | None, str]]:
+        lines = text.splitlines()
+        blocks: list[tuple[str | None, str]] = []
+        current_section: str | None = None
+        current_lines: list[str] = []
+
+        def flush() -> None:
+            nonlocal current_lines, current_section
+            block_text = "\n".join(current_lines).strip()
+            if block_text:
+                blocks.append((current_section, block_text))
+            current_lines = []
+
+        for line in lines:
+            if self.heading_pattern.match(line.strip()):
+                flush()
+                current_section = line.strip().lstrip("#").strip().rstrip(":")
+                continue
+            current_lines.append(line)
+
+        flush()
+        if not blocks:
+            return [(None, text)]
+        return blocks
+
+    def _split_block(self, block: str, max_size: int) -> list[str]:
+        if len(block) <= max_size:
+            return [block]
+
+        parts: list[str] = []
+        start = 0
+
+        while start < len(block):
+            end = min(len(block), start + max_size)
+            if end < len(block):
+                cut = max(block.rfind("\n\n", start, end), block.rfind("\n", start, end))
+                if cut > start + max_size // 2:
+                    end = cut
+            piece = block[start:end].strip()
+            if piece:
+                parts.append(piece)
+            if end >= len(block):
+                break
+            start = max(0, end - self.overlap_tail_chars)
+
+        return parts
+```
+
+## `src/rag_index/indexing/__init__.py`
+```python
+__all__ = []
+```
+
+## `src/rag_index/indexing/schema.py`
+```python
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+
+SCHEMA_SQL = """
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS documents (
+    doc_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    title TEXT NOT NULL,
+    path TEXT NOT NULL,
+    doc_type TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chunks (
+    chunk_id TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    section TEXT,
+    chunk_index INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    char_len INTEGER NOT NULL,
+    token_len INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (doc_id) REFERENCES documents(doc_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS embeddings (
+    chunk_id TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    vector TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chunk_id, model_name),
+    FOREIGN KEY (chunk_id) REFERENCES chunks(chunk_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_strategy ON chunks(strategy);
+CREATE INDEX IF NOT EXISTS idx_embeddings_model_name ON embeddings(model_name);
+"""
+
+
+def connect_db(db_path: str | Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON;")
+    return conn
+
+
+def init_db(db_path: str | Path) -> None:
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    with connect_db(db_path) as conn:
+        conn.executescript(SCHEMA_SQL)
+        conn.commit()
+```
+
+## `src/rag_index/indexing/repository.py`
+```python
+from __future__ import annotations
+
+import json
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+from rag_index.indexing.schema import connect_db, init_db
+
+
+@dataclass
+class DocumentRow:
+    doc_id: str
+    source: str
+    title: str
+    path: str
+    doc_type: str
+
+
+@dataclass
+class ChunkRow:
+    chunk_id: str
+    doc_id: str
+    strategy: str
+    section: str | None
+    chunk_index: int
+    text: str
+    char_len: int
+    token_len: int | None = None
+
+
+@dataclass
+class EmbeddingRow:
+    chunk_id: str
+    model_name: str
+    vector: list[float]
+    dim: int
+
+
+class Repository:
+    def __init__(self, db_path: str | Path):
+        self.db_path = Path(db_path)
+        init_db(self.db_path)
+
+    def _conn(self) -> sqlite3.Connection:
+        return connect_db(self.db_path)
+
+    def upsert_document(self, row: DocumentRow) -> None:
+        sql = """
+        INSERT INTO documents (doc_id, source, title, path, doc_type)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(doc_id) DO UPDATE SET
+            source=excluded.source,
+            title=excluded.title,
+            path=excluded.path,
+            doc_type=excluded.doc_type
+        """
+        with self._conn() as conn:
+            conn.execute(sql, (row.doc_id, row.source, row.title, row.path, row.doc_type))
+            conn.commit()
+
+    def upsert_chunks(self, rows: Iterable[ChunkRow]) -> None:
+        sql = """
+        INSERT INTO chunks (
+            chunk_id, doc_id, strategy, section, chunk_index, text, char_len, token_len
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(chunk_id) DO UPDATE SET
+            doc_id=excluded.doc_id,
+            strategy=excluded.strategy,
+            section=excluded.section,
+            chunk_index=excluded.chunk_index,
+            text=excluded.text,
+            char_len=excluded.char_len,
+            token_len=excluded.token_len
+        """
+        payload = [
+            (
+                r.chunk_id,
+                r.doc_id,
+                r.strategy,
+                r.section,
+                r.chunk_index,
+                r.text,
+                r.char_len,
+                r.token_len,
+            )
+            for r in rows
+        ]
+        with self._conn() as conn:
+            conn.executemany(sql, payload)
+            conn.commit()
+
+    def upsert_embeddings(self, rows: Iterable[EmbeddingRow]) -> None:
+        sql = """
+        INSERT INTO embeddings (chunk_id, model_name, vector, dim)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(chunk_id, model_name) DO UPDATE SET
+            vector=excluded.vector,
+            dim=excluded.dim
+        """
+        payload = [(r.chunk_id, r.model_name, json.dumps(r.vector), r.dim) for r in rows]
+        with self._conn() as conn:
+            conn.executemany(sql, payload)
+            conn.commit()
+
+    def fetch_all_embeddings(self, model_name: str) -> list[sqlite3.Row]:
+        sql = """
+        SELECT c.chunk_id, c.doc_id, c.strategy, c.section, c.chunk_index, c.text,
+               c.char_len, c.token_len, d.title, d.source, d.path, e.vector, e.dim
+        FROM chunks c
+        JOIN documents d ON d.doc_id = c.doc_id
+        JOIN embeddings e ON e.chunk_id = c.chunk_id
+        WHERE e.model_name = ?
+        ORDER BY c.doc_id, c.chunk_index
+        """
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(sql, (model_name,))
+            return cur.fetchall()
+
+    def count_documents(self) -> int:
+        with self._conn() as conn:
+            cur = conn.execute("SELECT COUNT(*) FROM documents")
+            return int(cur.fetchone()[0])
+
+    def count_chunks(self) -> int:
+        with self._conn() as conn:
+            cur = conn.execute("SELECT COUNT(*) FROM chunks")
+            return int(cur.fetchone()[0])
+
+    def count_embeddings(self) -> int:
+        with self._conn() as conn:
+            cur = conn.execute("SELECT COUNT(*) FROM embeddings")
+            return int(cur.fetchone()[0])
+```
+
+## `src/rag_index/indexing/indexer.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable
+
+from rag_index.chunking.fixed_size import FixedSizeChunker
+from rag_index.chunking.structured import StructuredChunker
+from rag_index.config import settings
+from rag_index.indexing.repository import ChunkRow, DocumentRow, EmbeddingRow, Repository
+from rag_index.models.ollama_client import OllamaEmbeddingClient
+
+
+@dataclass(frozen=True)
+class SourceDocument:
+    doc_id: str
+    source: str
+    title: str
+    path: str
+    doc_type: str
+    text: str
+
+
+class Indexer:
+    def __init__(self, repository: Repository, embedder: OllamaEmbeddingClient, model_name: str):
+        self.repository = repository
+        self.embedder = embedder
+        self.model_name = model_name
+        self.fixed_chunker = FixedSizeChunker(
+            chunk_size=settings.fixed_chunk_size,
+            overlap=settings.fixed_chunk_overlap,
+        )
+        self.structured_chunker = StructuredChunker(
+            max_chunk_size=settings.structured_max_chunk_size,
+            overlap_tail_chars=settings.structured_overlap_tail_chars,
+        )
+
+    def index_documents(self, documents: Iterable[SourceDocument]) -> None:
+        for doc in documents:
+            self.repository.upsert_document(
+                DocumentRow(
+                    doc_id=doc.doc_id,
+                    source=doc.source,
+                    title=doc.title,
+                    path=doc.path,
+                    doc_type=doc.doc_type,
+                )
+            )
+
+            fixed_chunks = self.fixed_chunker.chunk(doc.doc_id, doc.text, title=doc.title)
+            structured_chunks = self.structured_chunker.chunk(doc.doc_id, doc.text, title=doc.title)
+
+            all_chunks = fixed_chunks + structured_chunks
+            if not all_chunks:
+                continue
+
+            self.repository.upsert_chunks(
+                [
+                    ChunkRow(
+                        chunk_id=c.chunk_id,
+                        doc_id=c.doc_id,
+                        strategy=c.strategy,
+                        section=c.section,
+                        chunk_index=c.chunk_index,
+                        text=c.text,
+                        char_len=c.char_len,
+                        token_len=c.token_len,
+                    )
+                    for c in all_chunks
+                ]
+            )
+
+            embeddings = self.embedder.embed_many([c.text for c in all_chunks])
+            self.repository.upsert_embeddings(
+                [
+                    EmbeddingRow(
+                        chunk_id=c.chunk_id,
+                        model_name=self.model_name,
+                        vector=vec,
+                        dim=len(vec),
+                    )
+                    for c, vec in zip(all_chunks, embeddings)
+                ]
+            )
+
+    def index_single_strategy(
+        self,
+        documents: Iterable[SourceDocument],
+        strategy: str = "fixed_size",
+    ) -> None:
+        if strategy == "fixed_size":
+            chunker = self.fixed_chunker
+        elif strategy == "structured":
+            chunker = self.structured_chunker
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
+
+        for doc in documents:
+            self.repository.upsert_document(
+                DocumentRow(
+                    doc_id=doc.doc_id,
+                    source=doc.source,
+                    title=doc.title,
+                    path=doc.path,
+                    doc_type=doc.doc_type,
+                )
+            )
+
+            chunks = chunker.chunk(doc.doc_id, doc.text, title=doc.title)
+            if not chunks:
+                continue
+
+            self.repository.upsert_chunks(
+                [
+                    ChunkRow(
+                        chunk_id=c.chunk_id,
+                        doc_id=c.doc_id,
+                        strategy=c.strategy,
+                        section=c.section,
+                        chunk_index=c.chunk_index,
+                        text=c.text,
+                        char_len=c.char_len,
+                        token_len=c.token_len,
+                    )
+                    for c in chunks
+                ]
+            )
+
+            embeddings = self.embedder.embed_many([c.text for c in chunks])
+            self.repository.upsert_embeddings(
+                [
+                    EmbeddingRow(
+                        chunk_id=c.chunk_id,
+                        model_name=self.model_name,
+                        vector=vec,
+                        dim=len(vec),
+                    )
+                    for c, vec in zip(chunks, embeddings)
+                ]
+            )
+```
+
+## `src/rag_index/retrieval/__init__.py`
+```python
+__all__ = []
+```
+
+## `src/rag_index/retrieval/cosine.py`
+```python
+from __future__ import annotations
+
+import numpy as np
+
+
+def cosine_similarity(a: list[float] | np.ndarray, b: list[float] | np.ndarray) -> float:
+    va = np.asarray(a, dtype=np.float32)
+    vb = np.asarray(b, dtype=np.float32)
+    denom = float(np.linalg.norm(va) * np.linalg.norm(vb))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(va, vb) / denom)
+
+
+def cosine_distance(a: list[float] | np.ndarray, b: list[float] | np.ndarray) -> float:
+    return 1.0 - cosine_similarity(a, b)
+```
+
+## `src/rag_index/retrieval/retriever.py`
+```python
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+import numpy as np
+
+from rag_index.indexing.repository import Repository
+from rag_index.models.ollama_client import OllamaEmbeddingClient
+from rag_index.retrieval.cosine import cosine_similarity
+
+
+@dataclass
+class RetrievedChunk:
+    chunk_id: str
+    doc_id: str
+    title: str
+    source: str
+    path: str
+    section: str | None
+    chunk_index: int
+    text: str
+    score: float
+
+
+class Retriever:
+    def __init__(
+        self,
+        repository: Repository,
+        embedder: OllamaEmbeddingClient,
+        model_name: str,
+    ):
+        self.repository = repository
+        self.embedder = embedder
+        self.model_name = model_name
+
+    def search(self, query: str, top_k: int = 5) -> list[RetrievedChunk]:
+        query_vec = self.embedder.embed_one(query)
+        rows = self.repository.fetch_all_embeddings(self.model_name)
+
+        scored: list[RetrievedChunk] = []
+        for row in rows:
+            vec = json.loads(row["vector"])
+            score = cosine_similarity(query_vec, vec)
+            scored.append(
+                RetrievedChunk(
+                    chunk_id=row["chunk_id"],
+                    doc_id=row["doc_id"],
+                    title=row["title"],
+                    source=row["source"],
+                    path=row["path"],
+                    section=row["section"],
+                    chunk_index=int(row["chunk_index"]),
+                    text=row["text"],
+                    score=score,
+                )
+            )
+
+        scored.sort(key=lambda x: x.score, reverse=True)
+        return scored[:top_k]
+```
+
+## `src/rag_index/evaluation/__init__.py`
+```python
+__all__ = []
+```
+
+## `src/rag_index/evaluation/metrics.py`
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable
+
+import numpy as np
+
+
+@dataclass(frozen=True)
+class ChunkingMetrics:
+    strategy: str
+    documents: int
+    chunks: int
+    avg_chunk_len: float
+    min_chunk_len: int
+    max_chunk_len: int
+    std_chunk_len: float
+
+
+@dataclass(frozen=True)
+class RetrievalMetrics:
+    total_queries: int
+    hit_rate_at_1: float
+    hit_rate_at_3: float
+    hit_rate_at_5: float
+    mean_reciprocal_rank: float
+
+
+def chunk_length_metrics(strategy: str, lengths: Iterable[int], documents: int) -> ChunkingMetrics:
+    arr = np.array(list(lengths), dtype=np.float32)
+    if arr.size == 0:
+        return ChunkingMetrics(strategy, documents, 0, 0.0, 0, 0, 0.0)
+
+    return ChunkingMetrics(
+        strategy=strategy,
+        documents=documents,
+        chunks=int(arr.size),
+        avg_chunk_len=float(arr.mean()),
+        min_chunk_len=int(arr.min()),
+        max_chunk_len=int(arr.max()),
+        std_chunk_len=float(arr.std(ddof=0)),
+    )
+
+
+def hit_rate_at_k(ranks: list[int | None], k: int) -> float:
+    if not ranks:
+        return 0.0
+    hits = sum(1 for r in ranks if r is not None and r <= k)
+    return hits / len(ranks)
+
+
+def mean_reciprocal_rank(ranks: list[int | None]) -> float:
+    if not ranks:
+        return 0.0
+    total = 0.0
+    for r in ranks:
+        if r is not None and r > 0:
+            total += 1.0 / r
+    return total / len(ranks)
+
+
+def retrieval_metrics(ranks: list[int | None]) -> RetrievalMetrics:
+    return RetrievalMetrics(
+        total_queries=len(ranks),
+        hit_rate_at_1=hit_rate_at_k(ranks, 1),
+        hit_rate_at_3=hit_rate_at_k(ranks, 3),
+        hit_rate_at_5=hit_rate_at_k(ranks, 5),
+        mean_reciprocal_rank=mean_reciprocal_rank(ranks),
+    )
+```
+
+## `src/rag_index/evaluation/compare.py`
+```python
+from __future__ import annotations
+
+import csv
+from dataclasses import asdict
+from pathlib import Path
+
+from rag_index.chunking.fixed_size import FixedSizeChunker
+from rag_index.chunking.structured import StructuredChunker
+from rag_index.config import settings
+from rag_index.evaluation.metrics import chunk_length_metrics
+from rag_index.loaders.code_loader import CodeLoader
+from rag_index.loaders.markdown_loader import MarkdownLoader
+from rag_index.loaders.pdf_loader import PdfLoader
+
+
+def load_text(path: Path):
+    suffix = path.suffix.lower()
+    if suffix in {".md", ".markdown"}:
+        loader = MarkdownLoader()
+    elif suffix == ".pdf":
+        loader = PdfLoader()
+    else:
+        loader = CodeLoader()
+    return loader.load(path)
+
+
+def iter_files(input_dir: Path) -> list[Path]:
+    allowed = {".md", ".markdown", ".pdf", ".py", ".js", ".ts", ".java", ".go", ".txt", ".json", ".yaml", ".yml"}
+    return [p for p in input_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed]
+
+
+def evaluate_strategy(strategy: str, paths: list[Path]):
+    if strategy == "fixed_size":
+        chunker = FixedSizeChunker(
+            chunk_size=settings.fixed_chunk_size,
+            overlap=settings.fixed_chunk_overlap,
+        )
+    elif strategy == "structured":
+        chunker = StructuredChunker(
+            max_chunk_size=settings.structured_max_chunk_size,
+            overlap_tail_chars=settings.structured_overlap_tail_chars,
+        )
+    else:
+        raise ValueError(strategy)
+
+    lengths: list[int] = []
+    docs = 0
+
+    for path in paths:
+        loaded = load_text(path)
+        docs += 1
+        chunks = chunker.chunk(loaded.doc_id, loaded.text, title=loaded.title)
+        lengths.extend([c.char_len for c in chunks])
+
+    return chunk_length_metrics(strategy=strategy, lengths=lengths, documents=docs)
+
+
+def compare_strategies(input_dir: str, out_csv: str) -> None:
+    root = Path(input_dir)
+    paths = iter_files(root)
+
+    results = [
+        evaluate_strategy("fixed_size", paths),
+        evaluate_strategy("structured", paths),
+    ]
+
+    out_path = Path(out_csv)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(asdict(results[0]).keys()))
+        writer.writeheader()
+        for item in results:
+            writer.writerow(asdict(item))
+
+    for item in results:
+        print(asdict(item))
+```
+
+## `src/rag_index/__main__.py`
+```python
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from rag_index.config import settings
+from rag_index.evaluation.compare import compare_strategies
+from rag_index.indexing.repository import Repository
+from rag_index.models.ollama_client import OllamaEmbeddingClient
+from rag_index.retrieval.retriever import Retriever
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="rag-index",
+        description="Local document indexing and retrieval for RAG",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_search = sub.add_parser("search", help="Search indexed documents")
+    p_search.add_argument("--db-path", default=str(settings.db_path))
+    p_search.add_argument("--model", default=settings.embedding_model)
+    p_search.add_argument("--query", required=True)
+    p_search.add_argument("--top-k", type=int, default=settings.top_k)
+
+    p_compare = sub.add_parser("compare", help="Compare chunking strategies")
+    p_compare.add_argument("--input-dir", default=str(settings.raw_dir))
+    p_compare.add_argument("--out-csv", default=str(settings.processed_dir / "chunking_comparison.csv"))
+
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.command == "search":
+        repository = Repository(Path(args.db_path))
+        embedder = OllamaEmbeddingClient(model=args.model, host=settings.ollama_host)
+        retriever = Retriever(repository=repository, embedder=embedder, model_name=args.model)
+        results = retriever.search(args.query, top_k=args.top_k)
+
+        for i, item in enumerate(results, start=1):
+            print(f"\n#{i} score={item.score:.4f}")
+            print(f"title: {item.title}")
+            print(f"source: {item.source}")
+            print(f"section: {item.section}")
+            print(f"text: {item.text[:800]}")
+    elif args.command == "compare":
+        compare_strategies(args.input_dir, args.out_csv)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## `scripts/build_index.py`
+```python
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from rag_index.config import settings
+from rag_index.indexing.indexer import Indexer, SourceDocument
+from rag_index.indexing.repository import Repository
+from rag_index.loaders.code_loader import CodeLoader
+from rag_index.loaders.markdown_loader import MarkdownLoader
+from rag_index.loaders.pdf_loader import PdfLoader
+from rag_index.models.ollama_client import OllamaEmbeddingClient
+
+
+def load_document(path: Path) -> SourceDocument:
+    suffix = path.suffix.lower()
+    if suffix in {".md", ".markdown"}:
+        loader = MarkdownLoader()
+    elif suffix == ".pdf":
+        loader = PdfLoader()
+    else:
+        loader = CodeLoader()
+
+    loaded = loader.load(path)
+    return SourceDocument(
+        doc_id=loaded.doc_id,
+        source=loaded.source,
+        title=loaded.title,
+        path=loaded.path,
+        doc_type=loaded.doc_type,
+        text=loaded.text,
+    )
+
+
+def iter_files(input_dir: Path) -> list[Path]:
+    allowed = {".md", ".markdown", ".pdf", ".py", ".js", ".ts", ".java", ".go", ".txt", ".json", ".yaml", ".yml"}
+    return [p for p in input_dir.rglob("*") if p.is_file() and p.suffix.lower() in allowed]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build local RAG index in SQLite")
+    parser.add_argument("--input-dir", default=str(settings.raw_dir))
+    parser.add_argument("--db-path", default=str(settings.db_path))
+    parser.add_argument("--model", default=settings.embedding_model)
+    args = parser.parse_args()
+
+    input_dir = Path(args.input_dir)
+    db_path = Path(args.db_path)
+
+    repository = Repository(db_path)
+    embedder = OllamaEmbeddingClient(model=args.model, host=settings.ollama_host)
+    indexer = Indexer(repository=repository, embedder=embedder, model_name=args.model)
+
+    documents = [load_document(p) for p in iter_files(input_dir)]
+    indexer.index_documents(documents)
+
+    print(f"Indexed documents: {repository.count_documents()}")
+    print(f"Indexed chunks: {repository.count_chunks()}")
+    print(f"Indexed embeddings: {repository.count_embeddings()}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## `scripts/search_demo.py`
+```python
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from rag_index.config import settings
+from rag_index.indexing.repository import Repository
+from rag_index.models.ollama_client import OllamaEmbeddingClient
+from rag_index.retrieval.retriever import Retriever
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Search RAG index by cosine similarity")
+    parser.add_argument("--db-path", default=str(settings.db_path))
+    parser.add_argument("--model", default=settings.embedding_model)
+    parser.add_argument("--query", required=True)
+    parser.add_argument("--top-k", type=int, default=settings.top_k)
+    args = parser.parse_args()
+
+    repository = Repository(Path(args.db_path))
+    embedder = OllamaEmbeddingClient(model=args.model, host=settings.ollama_host)
+    retriever = Retriever(repository=repository, embedder=embedder, model_name=args.model)
+
+    results = retriever.search(args.query, top_k=args.top_k)
+
+    for i, item in enumerate(results, start=1):
+        print(f"\n#{i} score={item.score:.4f}")
+        print(f"title: {item.title}")
+        print(f"source: {item.source}")
+        print(f"section: {item.section}")
+        print(f"chunk_id: {item.chunk_id}")
+        print(f"text: {item.text[:800]}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## `scripts/compare_chunking.py`
+```python
+from __future__ import annotations
+
+import argparse
+
+from rag_index.evaluation.compare import compare_strategies
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Compare chunking strategies")
+    parser.add_argument("--input-dir", required=True)
+    parser.add_argument("--out-csv", default="data/processed/chunking_comparison.csv")
+    args = parser.parse_args()
+    compare_strategies(args.input_dir, args.out_csv)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## `README.md`
+```md
+# rag-doc-index
+
+Локальный индекс документов для RAG на Python:
+- chunking двух стратегий;
+- embeddings через Ollama;
+- хранение чанков и векторов в SQLite;
+- поиск по cosine similarity;
+- подготовка к подключению к агенту.
+
+## Установка
+```bash
+pip install -e .
+ollama pull embeddinggemma
+```
+
+## Индексация
+```bash
+python scripts/build_index.py --input-dir data/raw --db-path data/index/rag.db --model embeddinggemma
+```
+
+## Поиск
+```bash
+python scripts/search_demo.py --db-path data/index/rag.db --model embeddinggemma --query "что такое chunking в RAG" --top-k 5
+```
+
+## Сравнение chunking
+```bash
+python scripts/compare_chunking.py --input-dir data/raw --out-csv data/processed/chunking_comparison.csv
+```
+
+## CLI
+```bash
+python -m rag_index search --query "что такое RAG"
+python -m rag_index compare --input-dir data/raw
+```
+```
+
+## `.env`
+```env
+OLLAMA_HOST=http://localhost:11434
+EMBEDDING_MODEL=embeddinggemma
+DB_PATH=data/index/rag.db
+RAW_DIR=data/raw
+PROCESSED_DIR=data/processed
+INDEX_DIR=data/index
+```
+
+## `tests/test_cosine.py`
+```python
+from rag_index.retrieval.cosine import cosine_distance, cosine_similarity
+
+
+def test_cosine_similarity_identical_vectors_is_one():
+    a = [1.0, 2.0, 3.0]
+    b = [1.0, 2.0, 3.0]
+    assert cosine_similarity(a, b) == 1.0
+
+
+def test_cosine_similarity_orthogonal_vectors_is_zero():
+    a = [1.0, 0.0]
+    b = [0.0, 1.0]
+    assert cosine_similarity(a, b) == 0.0
+
+
+def test_cosine_similarity_zero_vector_is_zero():
+    a = [0.0, 0.0]
+    b = [1.0, 2.0]
+    assert cosine_similarity(a, b) == 0.0
+
+
+def test_cosine_distance_is_one_minus_similarity():
+    a = [1.0, 0.0]
+    b = [0.0, 1.0]
+    assert cosine_distance(a, b) == 1.0
+```
+
+## `tests/test_chunking.py`
+```python
+from rag_index.chunking.fixed_size import FixedSizeChunker
+from rag_index.chunking.structured import StructuredChunker
+
+
+def test_fixed_size_chunker_returns_chunks():
+    text = "a" * 2500
+    chunker = FixedSizeChunker(chunk_size=1000, overlap=100)
+    chunks = chunker.chunk("doc-1", text, title="Doc")
+    assert len(chunks) >= 2
+    assert all(c.strategy == "fixed_size" for c in chunks)
+
+
+def test_fixed_size_chunker_respects_overlap():
+    text = "abcdef" * 400
+    chunker = FixedSizeChunker(chunk_size=500, overlap=50)
+    chunks = chunker.chunk("doc-1", text, title="Doc")
+    assert len(chunks) >= 2
+    assert chunks[0].text != ""
+    assert chunks[1].text != ""
+
+
+def test_structured_chunker_uses_headings():
+    text = """
+# Intro
+This is intro text.
+
+## Usage
+This is usage text.
+
+## API
+This is API text.
+""".strip()
+
+    chunker = StructuredChunker(max_chunk_size=200)
+    chunks = chunker.chunk("doc-1", text, title="Doc")
+    assert len(chunks) >= 3
+    sections = [c.section for c in chunks]
+    assert "Intro" in sections
+    assert "Usage" in sections
+    assert "API" in sections
+
+
+def test_structured_chunker_returns_empty_for_empty_text():
+    chunker = StructuredChunker()
+    chunks = chunker.chunk("doc-1", "", title="Doc")
+    assert chunks == []
+```
+
+## `tests/test_repository.py`
+```python
+from pathlib import Path
+
+from rag_index.indexing.repository import ChunkRow, DocumentRow, EmbeddingRow, Repository
+
+
+def test_repository_upserts_and_counts(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    repo = Repository(db_path)
+
+    repo.upsert_document(
+        DocumentRow(
+            doc_id="doc-1",
+            source="src",
+            title="Title",
+            path="path/to/doc.md",
+            doc_type="markdown",
+        )
+    )
+    repo.upsert_chunks(
+        [
+            ChunkRow(
+                chunk_id="chunk-1",
+                doc_id="doc-1",
+                strategy="fixed_size",
+                section="Intro",
+                chunk_index=0,
+                text="hello world",
+                char_len=11,
+                token_len=None,
+            )
+        ]
+    )
+    repo.upsert_embeddings(
+        [
+            EmbeddingRow(
+                chunk_id="chunk-1",
+                model_name="embeddinggemma",
+                vector=[0.1, 0.2, 0.3],
+                dim=3,
+            )
+        ]
+    )
+
+    assert repo.count_documents() == 1
+    assert repo.count_chunks() == 1
+    assert repo.count_embeddings() == 1
+```
+
+## `tests/test_retrieval.py`
+```python
+from pathlib import Path
+
+from rag_index.indexing.repository import ChunkRow, DocumentRow, EmbeddingRow, Repository
+from rag_index.retrieval.retriever import Retriever
+
+
+class DummyEmbedder:
+    def __init__(self, vec):
+        self.vec = vec
+
+    def embed_one(self, text: str):
+        return self.vec
+
+
+def test_retriever_returns_best_match(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    repo = Repository(db_path)
+
+    repo.upsert_document(
+        DocumentRow(
+            doc_id="doc-1",
+            source="src",
+            title="Doc 1",
+            path="doc1.md",
+            doc_type="markdown",
+        )
+    )
+    repo.upsert_document(
+        DocumentRow(
+            doc_id="doc-2",
+            source="src",
+            title="Doc 2",
+            path="doc2.md",
+            doc_type="markdown",
+        )
+    )
+
+    repo.upsert_chunks(
+        [
+            ChunkRow(
+                chunk_id="chunk-1",
+                doc_id="doc-1",
+                strategy="fixed_size",
+                section="A",
+                chunk_index=0,
+                text="about cats",
+                char_len=10,
+                token_len=None,
+            ),
+            ChunkRow(
+                chunk_id="chunk-2",
+                doc_id="doc-2",
+                strategy="fixed_size",
+                section="B",
+                chunk_index=0,
+                text="about dogs",
+                char_len=10,
+                token_len=None,
+            ),
+        ]
+    )
+
+    repo.upsert_embeddings(
+        [
+            EmbeddingRow(
+                chunk_id="chunk-1",
+                model_name="test-model",
+                vector=[1.0, 0.0],
+                dim=2,
+            ),
+            EmbeddingRow(
+                chunk_id="chunk-2",
+                model_name="test-model",
+                vector=[0.0, 1.0],
+                dim=2,
+            ),
+        ]
+    )
+
+    retriever = Retriever(
+        repository=repo,
+        embedder=DummyEmbedder([1.0, 0.0]),
+        model_name="test-model",
+    )
+
+    results = retriever.search("cats", top_k=1)
+    assert len(results) == 1
+    assert results[0].chunk_id == "chunk-1"
+```
+
+## `tests/test_metrics.py`
+```python
+from rag_index.evaluation.metrics import chunk_length_metrics, retrieval_metrics
+
+
+def test_chunk_length_metrics():
+    m = chunk_length_metrics("fixed_size", [10, 20, 30], documents=2)
+    assert m.chunks == 3
+    assert m.avg_chunk_len == 20.0
+    assert m.min_chunk_len == 10
+    assert m.max_chunk_len == 30
+
+
+def test_retrieval_metrics():
+    m = retrieval_metrics([1, 2, None, 5])
+    assert m.total_queries == 4
+    assert m.hit_rate_at_1 == 0.25
+    assert m.hit_rate_at_3 == 0.5
+    assert m.hit_rate_at_5 == 0.75
+```
+
+Если хочешь, следующим сообщением я могу дать **минимальный `tree` финального проекта после этих файлов**, чтобы ты сразу видел, что куда положить.
+
+
+
+
+
+
+
+Покажи структуру проекта в виде дерева файлов
+
+Вот актуальное дерево проекта после всех файлов, которые мы собрали. Оно уже отражает полный пайплайн: loaders → chunking → embeddings → SQLite → retrieval → evaluation → CLI. Ollama используется как локальный источник embeddings, а SQLite хранит документы, чанки и векторы. [1][2][3]
+
+```text
+rag-doc-index/
+├─ pyproject.toml
+├─ README.md
+├─ .env
+├─ data/
+│  ├─ raw/
+│  │  ├─ README.md
+│  │  ├─ articles/
+│  │  ├─ code/
+│  │  └─ pdf/
+│  ├─ processed/
+│  │  └─ chunking_comparison.csv
+│  └─ index/
+│     └─ rag.db
+├─ configs/
+│  ├─ app.yaml
+│  └─ models.yaml
+├─ scripts/
+│  ├─ build_index.py
+│  ├─ search_demo.py
+│  └─ compare_chunking.py
+├─ src/
+│  └─ rag_index/
+│     ├─ __init__.py
+│     ├─ __main__.py
+│     ├─ config.py
+│     ├─ logging_config.py
+│     ├─ chunking/
+│     │  ├─ __init__.py
+│     │  ├─ base.py
+│     │  ├─ fixed_size.py
+│     │  └─ structured.py
+│     ├─ evaluation/
+│     │  ├─ __init__.py
+│     │  ├─ compare.py
+│     │  └─ metrics.py
+│     ├─ indexing/
+│     │  ├─ __init__.py
+│     │  ├─ indexer.py
+│     │  ├─ repository.py
+│     │  └─ schema.py
+│     ├─ loaders/
+│     │  ├─ __init__.py
+│     │  ├─ base.py
+│     │  ├─ code_loader.py
+│     │  ├─ markdown_loader.py
+│     │  └─ pdf_loader.py
+│     ├─ models/
+│     │  ├─ __init__.py
+│     │  ├─ embeddings.py
+│     │  └─ ollama_client.py
+│     └─ retrieval/
+│        ├─ __init__.py
+│        ├─ cosine.py
+│        └─ retriever.py
+└─ tests/
+   ├─ test_chunking.py
+   ├─ test_cosine.py
+   ├─ test_metrics.py
+   ├─ test_repository.py
+   └─ test_retrieval.py
+```
+
+## Что здесь уже есть
+- `scripts/` — запуск индексации, поиска и сравнения chunking.
+- `src/rag_index/` — основная библиотека.
+- `tests/` — базовые unit-тесты на ключевые части.
+- `data/` — локальные данные, индекс и результаты сравнения. [4][5]
+
+## Как это работает
+Сначала документы из `data/raw/` проходят через loaders, затем chunking, потом embeddings через Ollama, после чего всё сохраняется в SQLite. Поиск делается через cosine similarity, а сравнение chunking сохраняется в CSV для отчёта. [1][6][2]
+
+Если хочешь, следующим сообщением я могу сделать **короткий чеклист “что уже готово / что ещё надо дописать”**.
+
+
+
+сделай **короткий чеклист “что уже готово / что ещё надо дописать”**.
+
+Вот короткий чеклист.
+
+## Уже готово
+- Структура проекта.
+- `pyproject.toml`.
+- `config.py` и `.env`.
+- SQLite-схема и репозиторий.
+- Ollama embedding client.
+- Loaders для `md`, кода и `pdf`.
+- Два chunking-режима: `fixed_size` и `structured`.
+- Indexer для связки пайплайна.
+- Retriever на cosine similarity.
+- Метрики и сравнение chunking.
+- CLI-скрипты: индексация, поиск, сравнение.
+- Базовые тесты.
+
+## Ещё надо дописать
+- Реальный прогон на твоих учебных документах.
+- Проверку, что Ollama и embedding-модель реально запускаются локально.
+- Настройку `models.yaml` и `app.yaml`, если хочешь не только `.env`.
+- Более честное сравнение chunking по quality-метрикам, а не только по длинам чанков.
+- Reranking, если захочешь улучшить retrieval.
+- Подключение retrieval-модуля к твоему учебному агенту.
+- Вывод источников в ответе агента.
+- Финальный отчёт по заданию.
+
+## Что важно сделать первым
+1. Запустить индексирование на 20–30 страницах.
+2. Проверить поиск на 5–10 тестовых запросах.
+3. Сравнить две стратегии chunking.
+4. Только потом подключать к агенту.
+
+Могу следующим сообщением собрать это в **план на 1 вечер** или **порядок коммитов по Git**.
+
+
+
+
+
+
+
+
+
+
+
+собери это в **план на 1 вечер**
+
+Вот план на один вечер — без лишней теории, только практические шаги. Ollama рекомендует использовать одну и ту же embedding-модель для индексации и запросов, а pytest сам находит `test_*.py`, так что можно быстро проверить пайплайн после каждой стадии. [1][2]
+
+## 1. Подготовка
+- Установить зависимости: `pip install -e .`
+- Поднять Ollama и скачать embedding-модель: `ollama pull embeddinggemma`
+- Проверить, что `.env` заполнен и `data/raw/` содержит документы. [1][3]
+
+## 2. Проверка базовых файлов
+- Открыть `config.py`, убедиться, что пути и модель читаются из `settings`.
+- Проверить `schema.py` и создание SQLite-файла.
+- Убедиться, что loaders читают markdown, code и pdf. [4][1]
+
+## 3. Сбор индекса
+- Запустить индексацию:
+  ```bash
+  python scripts/build_index.py --input-dir data/raw --db-path data/index/rag.db --model embeddinggemma
+  ```
+- Проверить, что в SQLite появились документы, чанки и embeddings.
+- Если что-то не индексируется, сначала проверить loader и chunking. [1][3]
+
+## 4. Проверка поиска
+- Запустить поиск:
+  ```bash
+  python scripts/search_demo.py --db-path data/index/rag.db --model embeddinggemma --query "что такое chunking в RAG" --top-k 5
+  ```
+- Посмотреть, что top-k чанков выглядят осмысленно.
+- Если поиск плохой, попробовать другой запрос и проверить качество чанков. [1][3]
+
+## 5. Сравнение chunking
+- Запустить сравнение:
+  ```bash
+  python scripts/compare_chunking.py --input-dir data/raw --out-csv data/processed/chunking_comparison.csv
+  ```
+- Сравнить `fixed_size` и `structured` по количеству чанков и средней длине.
+- Сохранить результат для отчёта. [2][5]
+
+## 6. Прогон тестов
+- Запустить:
+  ```bash
+  pytest
+  ```
+- Если что-то падает, сначала чинить `test_repository.py` и `test_retrieval.py`.
+- Затем проверить `test_chunking.py` и `test_cosine.py`. [2][6]
+
+## 7. Минимальная доработка
+- Подправить размеры чанков, если retrieval слабый.
+- При необходимости сменить модель на `qwen3-embedding` или `all-minilm`.
+- Убедиться, что в отчёте есть: схема, 2 chunking-стратегии, embeddings, SQLite, cosine search, сравнение. [1]
+
+## 8. Что должно остаться к концу вечера
+- Рабочий локальный индекс.
+- Поиск по запросу.
+- CSV с сравнением chunking.
+- Прогнанные тесты.
+- Понимание, что дальше нужно только подключить модуль к агенту. [2][1]
+
+Могу следующим сообщением собрать это в **очень короткий чеклист на 30–40 минут**.
+
+
+
+
+
+
+
+
+
+
+
+собери версию на 30–40 минут
+
+Вот версия плана на **30–40 минут**: только то, что нужно, чтобы быстро поднять рабочий минимальный RAG-индекс и проверить, что всё живое. Ollama embeddings подходят для cosine search и RAG, а `pytest` по умолчанию запускает тесты из файлов `test_*.py`. [1][2]
+
+## 0–5 минут: подготовка
+- Проверить, что зависимости стоят: `pip install -e .`
+- Убедиться, что `OLLAMA_HOST` задан в `.env`.
+- Скачать embedding-модель: `ollama pull embeddinggemma`. [1]
+
+## 5–10 минут: проверить входные данные
+- Положить 2–3 коротких документа в `data/raw/`.
+- Убедиться, что есть хотя бы один `md` и один файл кода или `txt`.
+- Не тратить время на PDF, если цель — только быстрый прогон.
+
+## 10–15 минут: собрать индекс
+- Запустить:
+  ```bash
+  python scripts/build_index.py --input-dir data/raw --db-path data/index/rag.db --model embeddinggemma
+  ```
+- Проверить, что в консоли появились числа документов, чанков и embeddings.
+- Если упало, сначала смотреть loader и путь к `data/raw`. [1]
+
+## 15–20 минут: проверить поиск
+- Запустить:
+  ```bash
+  python scripts/search_demo.py --db-path data/index/rag.db --model embeddinggemma --query "что такое RAG" --top-k 3
+  ```
+- Посмотреть, что выводятся осмысленные куски текста.
+- Если ответы странные, поменять запрос на более конкретный. [1]
+
+## 20–25 минут: сравнить chunking
+- Запустить:
+  ```bash
+  python scripts/compare_chunking.py --input-dir data/raw --out-csv data/processed/chunking_comparison.csv
+  ```
+- Убедиться, что CSV появился.
+- Быстро посмотреть, какая стратегия даёт больше чанков и какие у них размеры.
+
+## 25–30 минут: быстрый тест
+- Запустить:
+  ```bash
+  pytest
+  ```
+- Если времени мало, можно сначала:
+  ```bash
+  pytest tests/test_cosine.py tests/test_chunking.py
+  ```
+- `pytest` по умолчанию ищет `test_*.py`, так что тесты должны подхватиться без доп. настройки. [2][3]
+
+## 30–40 минут: минимальная фиксация результата
+- Записать, что индекс построен.
+- Сохранить один пример поиска.
+- Сохранить CSV сравнения chunking.
+- Отметить, что следующий шаг — подключение retrieval к агенту. [1]
+
+## Что считается успехом
+- Есть `rag.db`.
+- Есть выдача top-k по запросу.
+- Есть `chunking_comparison.csv`.
+- Хотя бы один тестовый прогон прошёл. [1][2]
+
+
+
+
+Cледующим сообщением соберу это в **супер-короткий чеклист на 10 пунктов** без пояснений.
+
+1. Установить зависимости.
+2. Поднять Ollama.
+3. Скачать `embeddinggemma`.
+4. Положить 2–3 документа в `data/raw/`.
+5. Запустить `build_index.py`.
+6. Проверить, что создался `rag.db`.
+7. Запустить `search_demo.py`.
+8. Запустить `compare_chunking.py`.
+9. Прогнать `pytest`.
+10. Сохранить результат и перейти к интеграции с агентом.
+
+
+
+
+
+
+
+
+
+

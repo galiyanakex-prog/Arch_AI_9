@@ -1,0 +1,12 @@
+### D4: /mcp route (живой VPS-каталог, 15 тулов) ###
+
+[live] enabled-серверы: ['time', 'weather', 'scheduler', 'pipeline']
+[live] каталог v1, тулов: 15
+[route] «который час» → mcp.time.get_time [time] (2) | имя: «time» | альт: mcp.weather.get_weather_forecast(1)
+[route] «собери свежие данные по python» → mcp.pipeline.search [pipeline] (7) | действие: «search», описание: «python», имя: «search», описание: «данные» | альт: mcp.weather.search_locations(5), mcp.pipeline.summarize(2)
+[route] «обработай этот текст в сводку» → mcp.pipeline.summarize [pipeline] (6) | действие: «summarize», имя: «summarize», описание: «текст» | альт: mcp.scheduler.get_summary(4), mcp.scheduler.latest_summary(3)
+[route] «сохрани результат в файл» → mcp.pipeline.saveToFile [pipeline] (8) | действие: «save», имя: «save», имя: «file», описание: «результат» | альт: mcp.pipeline.readFile(3), mcp.pipeline.summarize(1)
+[route] «напомни о сводке через час» → mcp.scheduler.schedule_reminder [scheduler] (7) | действие: «remind», имя: «remind», имя: «schedule» | альт: mcp.scheduler.get_summary(4), mcp.scheduler.latest_summary(4)
+[route] «погода в Москве» → mcp.weather.get_forecast_metadata [weather] (4) | имя: «forecast», имя: «weather» | альт: mcp.weather.get_weather_forecast(4), mcp.weather.search_locations(3)
+[route] «сделай непонятно что» → совпадений нет
+LIVE D4 OK: ранжирование по живому каталогу

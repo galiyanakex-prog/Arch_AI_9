@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Агент с явной моделью памяти
+Comment=Запуск агента с явной моделью памяти (memory layers)
+Exec=/home/u/Документы/111111/Обучение_Курсы/Основной_репозиторий/AI_9/run.sh
+Path=/home/u/Документы/111111/Обучение_Курсы/Основной_репозиторий/AI_9
+Terminal=true
+Encoding=UTF-8
+Categories=Utility;Development;

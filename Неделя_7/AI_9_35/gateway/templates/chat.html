@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI_9 — чат</title>
+  <style>
+    :root { --bg:#0f1115; --card:#1a1e26; --fg:#e8eaed; --muted:#9aa0a6;
+            --accent:#8ab4f8; --user:#26303f; --bot:#1f2530; --err:#f28b82;
+            --border:#2a2f3a; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+           background:var(--bg); color:var(--fg); height:100vh; display:flex;
+           flex-direction:column; }
+    header { display:flex; align-items:center; gap:12px; padding:12px 16px;
+             border-bottom:1px solid var(--border); background:var(--card); flex-wrap:wrap; }
+    header .title { font-weight:600; }
+    header .who { color:var(--muted); font-size:13px; }
+    header .spacer { flex:1; }
+    select { padding:8px 10px; border-radius:8px; border:1px solid var(--border);
+             background:#12151c; color:var(--fg); font-size:13px; }
+    .logout { color:var(--muted); text-decoration:none; font-size:13px; }
+    .logout:hover { color:var(--fg); }
+    #log { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column;
+           gap:12px; }
+    .msg { max-width:760px; padding:12px 16px; border-radius:14px; line-height:1.5;
+           white-space:pre-wrap; word-wrap:break-word; }
+    .msg.user { align-self:flex-end; background:var(--user); }
+    .msg.assistant { align-self:flex-start; background:var(--bot); }
+    .msg .meta { display:block; margin-top:8px; font-size:11px; color:var(--muted); }
+    .msg .sources { margin-top:8px; font-size:12px; color:var(--muted); }
+    .msg .sources div { margin-top:2px; }
+    footer { border-top:1px solid var(--border); background:var(--card); padding:12px 16px;
+             display:flex; gap:10px; align-items:flex-end; }
+    textarea { flex:1; padding:12px 14px; border-radius:12px; border:1px solid var(--border);
+               background:#12151c; color:var(--fg); font-size:15px; outline:none;
+               font-family:inherit; resize:none; max-height:160px; }
+    textarea:focus { border-color:var(--accent); }
+    button.send { padding:12px 20px; border:none; border-radius:12px; background:var(--accent);
+                  color:#10131a; font-weight:600; cursor:pointer; font-size:15px; }
+    button.send:disabled { opacity:.5; cursor:default; }
+    .notice { color:var(--err); font-size:13px; padding:0 20px 8px; }
+    .empty { color:var(--muted); text-align:center; margin:auto; font-size:14px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="title">AI_9</span>
+    <span class="who">вы вошли как <b>{{ login }}</b></span>
+    <span class="spacer"></span>
+    <select id="provider" title="Провайдер"></select>
+    <select id="model" title="Модель"></select>
+    <a class="logout" href="{{ url_for('logout') }}">Выйти</a>
+  </header>
+  <div id="log">
+    {% if not history %}<div class="empty">Задайте первый вопрос — агент ответит.</div>{% endif %}
+    {% for m in history %}
+    <div class="msg {{ m.role }}">
+      {{ m.text }}
+      {% if m.model %}<span class="meta">модель: {{ m.model }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="notice" id="notice"></div>
+  <footer>
+    <textarea id="input" rows="1" placeholder="Ваш вопрос… (Enter — отправить)"></textarea>
+    <button class="send" id="send">Отправить</button>
+  </footer>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const inputEl = document.getElementById('input');
+    const sendEl = document.getElementById('send');
+    const noticeEl = document.getElementById('notice');
+    const providerEl = document.getElementById('provider');
+    const modelEl = document.getElementById('model');
+    let models = [];
+
+    function scrollDown() { logEl.scrollTop = logEl.scrollHeight; }
+    scrollDown();
+
+    function addMessage(role, text, model, sources) {
+      const empty = logEl.querySelector('.empty');
+      if (empty) empty.remove();
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      div.textContent = text;
+      if (model) {
+        const meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = 'модель: ' + model;
+        div.appendChild(meta);
+      }
+      if (sources && sources.length) {
+        const box = document.createElement('div');
+        box.className = 'sources';
+        sources.slice(0, 5).forEach(s => {
+          const line = document.createElement('div');
+          line.textContent = '· ' + (s.source || s.title || s.doc_id || 'источник');
+          box.appendChild(line);
+        });
+        div.appendChild(box);
+      }
+      logEl.appendChild(div);
+      scrollDown();
+    }
+
+    function fillModels() {
+      const providers = [...new Set(models.map(m => m.service))];
+      providerEl.innerHTML = '';
+      providers.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = p;
+        providerEl.appendChild(o);
+      });
+      fillModelsForProvider();
+    }
+
+    function fillModelsForProvider() {
+      const p = providerEl.value;
+      modelEl.innerHTML = '';
+      models.filter(m => m.service === p).forEach(m => {
+        const o = document.createElement('option');
+        o.value = m.id; o.textContent = m.label || m.model || m.id;
+        modelEl.appendChild(o);
+      });
+    }
+
+    async function loadModels() {
+      try {
+        const r = await fetch('/api/models');
+        const data = await r.json();
+        if (r.ok && data.models) { models = data.models; fillModels(); }
+      } catch (e) { /* список моделей не критичен для чата */ }
+    }
+
+    providerEl.addEventListener('change', fillModelsForProvider);
+
+    async function switchModel() {
+      const provider = providerEl.value;
+      const model = modelEl.value;
+      if (!model) return;
+      try {
+        const r = await fetch('/api/model', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({provider, model})
+        });
+        const data = await r.json();
+        if (!r.ok) noticeEl.textContent = data.error || 'Не удалось переключить модель.';
+        else noticeEl.textContent = '';
+      } catch (e) { noticeEl.textContent = 'Сервис временно недоступен.'; }
+    }
+    modelEl.addEventListener('change', switchModel);
+
+    async function send() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      noticeEl.textContent = '';
+      // Повтор после обрыва: тот же текст и сохранённый request_id → не
+      // добавляем реплику пользователя в интерфейс второй раз.
+      const isRetry = inputEl.dataset.requestId &&
+                      inputEl.dataset.requestText === text;
+      if (!isRetry) addMessage('user', text);
+      inputEl.value = '';
+      sendEl.disabled = true;
+      // request_id: повтор после обрыва с тем же id вернёт уже готовый ответ,
+      // не создавая дубликат (идемпотентность, этап 11).
+      let requestId = isRetry ? inputEl.dataset.requestId
+                    : (crypto.randomUUID ? crypto.randomUUID()
+                       : String(Date.now()) + Math.random().toString(16).slice(2));
+      inputEl.dataset.requestId = requestId;
+      inputEl.dataset.requestText = text;
+      try {
+        const r = await fetch('/api/ask', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text, request_id: requestId,
+                                provider: providerEl.value, model: modelEl.value})
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          noticeEl.textContent = data.error || ('Ошибка ' + r.status);
+        } else {
+          addMessage('assistant', data.answer || '', data.model, data.sources);
+          // Успех — сбрасываем сохранённый id, следующий вопрос получит новый.
+          delete inputEl.dataset.requestId;
+          delete inputEl.dataset.requestText;
+        }
+      } catch (e) {
+        // Обрыв связи: сохраняем текст и request_id, чтобы повтор не дублировал.
+        noticeEl.textContent = 'Связь прервана. Нажмите «Отправить» ещё раз — ' +
+                               'ответ не продублируется.';
+        inputEl.value = text;
+      } finally {
+        sendEl.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    sendEl.addEventListener('click', send);
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    inputEl.addEventListener('input', () => {
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+    });
+
+    loadModels();
+  </script>
+</body>
+</html>

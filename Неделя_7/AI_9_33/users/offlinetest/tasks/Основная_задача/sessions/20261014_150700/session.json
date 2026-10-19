@@ -1,0 +1,52 @@
+{
+  "messages": [
+    {
+      "content": "какие инварианты есть у агента",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M1",
+      "id": "M1",
+      "parent_id": null,
+      "role": "user",
+      "created_at": "2026-10-14 15:07:00"
+    },
+    {
+      "content": "[5a49d570c6b338ecba6da557162e1dad2887c499#5a49d570c6b338ecba6da557162e1dad2887c499#0] core/invariants.py · invariants · раздел: -*- coding: utf-8 -*-\n    # -*- coding: utf-8 -*- \"\"\"Инварианты и ограничения состояния (День 14). Неизменяемые правила, которые агент не имеет права нарушать (канон `Задание_Д14.txt`, целевое состояние `arch_den_14.md` §2.2–2.4, §2.10): * Invariant — одно правило (id, description, category, severity, active); * ConstraintSet — набор правил — ОТДЕЛЬНАЯ сущность (не память, не профиль, не история диалога); хранится своим файлом и переживает очистку истории и перезапуск процесса; * ProposedAction — предлагаемое действие, которое проверяется кодом; * InvariantChecker — интерфейс (ABC) + RuleBasedChecker: детерминированная проверка действия ДО изменения состояния/запуска инструмента; * update_invariant — изменение правил",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M1a",
+      "id": "M2",
+      "parent_id": "M1",
+      "role": "assistant",
+      "created_at": "2026-10-14 15:08:50"
+    },
+    {
+      "content": "как устроен реестр моделей",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M2",
+      "id": "M3",
+      "parent_id": "M2",
+      "role": "user",
+      "created_at": "2026-10-14 15:08:50"
+    },
+    {
+      "content": "[db63ce0832be10d6e3ac0eb18696bc4f8a9198d7#db63ce0832be10d6e3ac0eb18696bc4f8a9198d7#8] ND/models/bge-m3_params.md · bge-m3_params · раздел: BGE-M3 (bge-m3) > Параметры запроса\n    | Параметр | Тип | По умолчанию | Описание |\n    |---|---|---|---|\n    | `model` | string | — | идентификатор модели (`bge-m3`) |\n\n**Реестр моделей:**\n1. **Идентификаторы:** bge-m3, llama-7b, qwen-7b, etc.\n2. **Параметры запроса:**\n   - `model`: идентификатор модели\n   - `input`: текст или список текстов для эмбеддинга\n   - `truncate`: обрезать вход до контекста (8192)\n   - `keep_alive`: сколько держать модель в памяти после запроса\n\n⚠ [RAG] Ответ не полностью подтверждён найденными источниками — проверьте утверждения, помеченные ссылками.",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M2a",
+      "id": "M4",
+      "parent_id": "M3",
+      "role": "assistant",
+      "created_at": "2026-10-14 15:11:46"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# services.list — список пользовательских systemd-юнитов MCP для деплоя.
+# Формат: <имя-юнита-без-.service>:<порт>. deploy_services.sh ставит, включает
+# и печатает статус каждого. Строки с # и пустые пропускаются.
+#
+# Этап 1 (И2б): time. Этап 3 (И3): scheduler + pipeline (несколько серверов).
+# Этап 10 (S2): шлюз доступа к агенту извне (:8080). Юнит туннеля (ai9-tunnel)
+# сюда НЕ входит — он ставится на ХОСТ, а не на VPS (см. units/ai9-tunnel.service).
+mcp-time-server:8000
+mcp-scheduler-server:8010
+mcp-pipeline-server:8020
+ai9-gateway:8080

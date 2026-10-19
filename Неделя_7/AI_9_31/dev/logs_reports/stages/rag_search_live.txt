@@ -1,0 +1,17 @@
+[RAG] Запрос «как считается бюджет токенов в промпте» (режим hybrid): Найдено источников: 5
+
+  1. [2180fabb3ba04a0c91cb6d515453f1a0421de70b#2180fabb3ba04a0c91cb6d515453f1a0421de70b#0] core/prompt_builder.py · раздел: -*- coding: utf-8 -*- · score=0.0180
+     # -*- coding: utf-8 -*- """Сборка промта явными блоками + дозированная доставка + токен-бюджет. Порядок блоков (канон): [system: роль] → [system: профиль] → [system: инварианты] → [system: долговременная] → [system: рабочая] → [system: summary общего префикса, опц.] → [messages: краткосрочная] → [us…
+
+  2. [2180fabb3ba04a0c91cb6d515453f1a0421de70b#2180fabb3ba04a0c91cb6d515453f1a0421de70b#15] core/prompt_builder.py · раздел: ответа кодом — grounding, этап 9. · score=0.0176
+     {ref} {where}" + (f" · {title}" if title else "") + (f" · раздел: {section}" if section else ""), f" {fragment}"] cost = estimator("\n".join(entry)) if used + cost > budget: continue lines.extend(entry) used += cost n_placed += 1 if not n_placed: return "" lines.append("") lines.append(RAG_INSTRUCTI…
+
+  3. [b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#37] dev/Проверка.md · раздел: Проверка_2.md — короткий сценарий ручной проверки (день 20, живой прогон) > Ревизия 5 — живые прогоны правок D1–D7 (день 20) · score=0.0170
+     | Метка | Что проверяем | Как | Статус | |---|---|---|---| | D1 | Порог probe + `enabled`-политика | `--mcp-probe` без env → READY time+weather, exit 0; с env → 4 сервера/15 тулов | ✅ | | D2 | Каталог инструментов в промте | `--mcp` → deliver содержит `tools`; `--no-tools-block` → нет | ✅ | | D3 | М…
+
+  4. [1923b397e301af08ebbe0e2e85c502eb8510b382#1923b397e301af08ebbe0e2e85c502eb8510b382#2] ND/models/DeepSee-V4-Pro-0813.md · score=0.0167
+     seed integer — Если задан, инференс выполняется детерминированно — повторные запросы с тем же seed и параметрами должны давать одинаковый результат. logprobs boolean — Возвращать ли логарифмы вероятностей выходных токенов. top_logprobs integer — Число от 0 до 20: сколько наиболее вероятных токенов в…
+
+  5. [db63ce0832be10d6e3ac0eb18696bc4f8a9198d7#db63ce0832be10d6e3ac0eb18696bc4f8a9198d7#2] ND/models/bge-m3_params.md · раздел: BGE-M3 (bge-m3) > Характеристики · score=0.0168
+     | Параметр | Значение | |---|---| | Размерность вектора (dim) | **1024** | | Контекстное окно | 8192 токена | | Языки | мультиязычная (RU + EN и др.) | | Размер модели | ~1.2 ГБ | | Дата релиза | 2024 |
+

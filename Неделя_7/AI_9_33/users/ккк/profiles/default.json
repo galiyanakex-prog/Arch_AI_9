@@ -1,0 +1,14 @@
+{
+  "id": "ккк",
+  "profile_id": "default",
+  "name": "ккк",
+  "style": {
+    "answers": "краткий"
+  },
+  "constraints": {
+    "answers": "python, bash"
+  },
+  "context": {
+    "answers": "программирование"
+  }
+}

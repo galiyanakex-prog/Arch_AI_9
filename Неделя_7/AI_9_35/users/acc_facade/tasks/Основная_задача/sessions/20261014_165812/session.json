@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {
+      "content": "привет",
+      "source": "user",
+      "scope": "session",
+      "owner": "acc_facade",
+      "visibility": "private",
+      "source_message_id": "M1",
+      "id": "M1",
+      "parent_id": null,
+      "role": "user",
+      "created_at": "2026-10-14 16:58:12"
+    },
+    {
+      "content": "[Mock] вижу 6 сообщений: system:Ты полезный ассистент с явной моделью памяти. Отвечай кратко на русском языке, у || system:[profile]\nПрофиль: acc_facade (default)\nИмя: acc_facade\nСтиль: answers: \nОгранич || system:[long_term]\nПрофиль: ссылка users/acc_facade/profile.json\nЗадача: Основная_задач || system:[working]\nЗадача: Первая задача (по смыслу первой сессии)\nСтадия задачи: new || user:привет || user:привет",
+      "source": "model",
+      "scope": "session",
+      "owner": "acc_facade",
+      "visibility": "private",
+      "source_message_id": "M1a",
+      "id": "M2",
+      "parent_id": "M1",
+      "role": "assistant",
+      "created_at": "2026-10-14 16:58:12"
+    }
+  ]
+}

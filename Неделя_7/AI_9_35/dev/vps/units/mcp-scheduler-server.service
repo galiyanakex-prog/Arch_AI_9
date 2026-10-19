@@ -1,0 +1,19 @@
+# mcp-scheduler-server.service — пользовательский юнит MCP-сервера планировщика (:8010).
+# Этап 3 (И3): второй сервер задания — «несколько MCP-серверов» (Задание_d20.txt).
+# Деплой — dev/vps/deploy_services.sh. Общий venv VPS (/home/t/doc/mcp/ai9).
+
+[Unit]
+Description=MCP scheduler server (AI_9, :8010)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/t/doc/AI_9
+ExecStart=/home/t/doc/mcp/ai9/bin/python -m integrations.mcp.scheduler_server
+Restart=always
+RestartSec=3
+Environment=SCHEDULER_PORT=8010
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

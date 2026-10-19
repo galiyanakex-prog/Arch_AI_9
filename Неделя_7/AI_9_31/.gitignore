@@ -1,0 +1,34 @@
+# Скрыть файлы с ключами
+.env
+ENV
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache
+
+# Временные файлы
+check_models.py
+.kodacli
+.tmp
+
+# Видео
+*.mp4
+*.mov
+
+# SSH
+.ssh
+
+# RAG: артефакты индекса (восстанавливаются командой --rag-ingest)
+rag/index/
+rag/.tmp/
+
+# Шлюз на VPS: база пользователей и история чата (создаётся на месте, не в git)
+gateway/users.db
+gateway/__pycache__/
+
+# Автосекрет сессии шлюза (решение №27) — генерируется на месте, не в git
+gateway/.secret
+
+Den_log.md
+tokens.csv

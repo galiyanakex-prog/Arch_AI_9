@@ -1,0 +1,15 @@
+{
+  "profile_ref": "modeltest",
+  "tasks": [
+    {
+      "name": "Основная_задача",
+      "ref": "tasks/Основная_задача"
+    },
+    {
+      "name": "Основная_задача",
+      "ref": "tasks/Основная_задача"
+    }
+  ],
+  "decisions": [],
+  "knowledge": []
+}

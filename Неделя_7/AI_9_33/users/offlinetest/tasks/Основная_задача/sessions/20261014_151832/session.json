@@ -1,0 +1,64 @@
+{
+  "messages": [
+    {
+      "content": "как запретить агенту менять технологический стек проекта",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M1",
+      "id": "M1",
+      "parent_id": null,
+      "role": "user",
+      "created_at": "2026-10-14 15:18:32"
+    },
+    {
+      "content": "[rag]\nНайденные источники (отвечай строго по ним):\n1. [5a49d570c6b338ecba6da557162e1dad2887c499#5a49d570c6b338ecba6da557162e1dad2887c499#0] core/invariants.py · invariants · раздел: -*- coding: utf-8 -*-\n    # -*- coding: utf-8 -*- \"\"\"Инварианты и ограничения состояния (День 14). Неизменяемые правила, которые агент не имеет права нарушать (канон `Задание_Д14.txt`, целевое состояние `arch_den_14.md` §2.2–2.4, §2.10): * Invariant — одно правило (id, description, category, severity, active); * ConstraintSet — набор правил — ОТДЕЛЬНАЯ сущность (не память, не профиль, не история диалога); хранится своим файлом и переживает очистку истории и перезапуск процесса; * ProposedAction — предлагаемое действие, которое проверяется кодом; * InvariantChecker — интерфейс (ABC) + RuleBasedChecker: детерминированная проверка действия ДО изменения состояния/запуска инструмента; * update_invariant — изменение правил\n2. [5a49d570c6b338ecba6da557162e1dad2887c499#5a49d570c6b338ecba6da557162e1dad2887c499#7] core/invariants.py · invariants · раздел: Известные технологии/языки — для детерминированной проверки по id-неймспейсу.\n    Обычная фраза в диалоге («а давай теперь на FastAPI») не меняет правило: без authorized=True поднимается PermissionError (канон `Задание_Д14.txt`). \"\"\" if not authorized: raise PermissionError( \"Изменение инвариантов требует отдельного подтверждения.\") inv = constraints.by_id(invariant_id) if inv is None: raise KeyError(f\"Инвариант не найден: {invariant_id}\") inv.description = new_description\n3. [b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#b6216ef6a3dc333b6a59b9e2d22ee1c9b9434809#25] dev/Проверка.md · Проверка · раздел: Проверка_2.md — короткий сценарий ручной проверки (день 20, живой прогон) > Сцен\n\n⚠ [RAG] Ответ не полностью подтверждён найденными источниками — проверьте утверждения, помеченные ссылками.",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M1a",
+      "id": "M2",
+      "parent_id": "M1",
+      "role": "assistant",
+      "created_at": "2026-10-14 15:23:56"
+    },
+    {
+      "content": "единый интерфейс для всех видов памяти агента",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M2",
+      "id": "M3",
+      "parent_id": "M2",
+      "role": "user",
+      "created_at": "2026-10-14 15:23:56"
+    },
+    {
+      "content": "[rag]\nНайденные источники (отвечай строго по ним):\n1. [579ae9ac0dc8d21986355ff085e0b7e67d1c9569#579ae9ac0dc8d21986355ff085e0b7e67d1c9569#0] memory/base.py · base · раздел: -*- coding: utf-8 -*-\n    # -*- coding: utf-8 -*- \"\"\"Базовый контракт модели памяти: MemoryLayer (ABC) + метаданные + задел PolicyEngine. Единый интерфейс для всех типов памяти (краткосрочная / рабочая / долговременная / профиль). Каждый объект памяти несёт метаданные (scope, owner, visibility, source, source_message_id). PolicyEngine здесь — пустой интерфейс-задел под фильтр инвариантов следующих дней (в Дне 11 рабочий фильтр НЕ реализуем). \"\"\" from abc import ABC, abstractmethod\n2. [579ae9ac0dc8d21986355ff085e0b7e67d1c9569#579ae9ac0dc8d21986355ff085e0b7e67d1c9569#3] memory/base.py · base · раздел: Обёртка над одним объектом памяти с метаданными (arch_prim R5).\n    # Обёртка над одним объектом памяти с метаданными (arch_prim R5). class MemoryItem: \"\"\"Элемент памяти: content + метаданные (scope/owner/visibility/source/...).\"\"\" def __init__(self, content, source: str = \"unknown\", scope: str = \"\", owner: str = \"\", visibility: str = \"private\", source_message_id: str = \"\", role: str = \"\"): self.content = content self.source = source # user | model | document | system self.scope = scope # user | task | session self.owner = owner self.visibility = visibility # private (заделы под scope/visibility) self.source_message_id = source_message_id self.role = role # user | assistant (для краткосрочной памяти) def to_dict(self) -> dict: return { \"content\": self.content, \"source\": self.source, \"scope\": self.scope, \"owner\": self.owner, \"visibility\": self.visibility, \"source_message_id\": self.source_message_id, \"role\": self.role }\n3. [1382007ab384e3f8eddd5490609e45309d956a13#1382007ab384e3f8eddd5490609e45309d956a13#0] memory/manager.py · manager · раздел: -*- coding: utf-8",
+      "source": "model",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M2a",
+      "id": "M4",
+      "parent_id": "M3",
+      "role": "assistant",
+      "created_at": "2026-10-14 15:27:40"
+    },
+    {
+      "content": "как устроен реестр моделей",
+      "source": "user",
+      "scope": "session",
+      "owner": "offlinetest",
+      "visibility": "private",
+      "source_message_id": "M3",
+      "id": "M5",
+      "parent_id": "M4",
+      "role": "user",
+      "created_at": "2026-10-14 15:27:40"
+    }
+  ]
+}
